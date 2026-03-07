@@ -71,6 +71,8 @@ interface SettingsDialogProps {
     vlmValidationEnabled?: boolean
     onVlmValidationChange?: (value: boolean) => void
     onOpenModelConfig?: () => void
+    drawioBaseUrl?: string
+    onDrawioBaseUrlChange?: (url: string) => void
 }
 
 export const STORAGE_ACCESS_CODE_KEY = "next-ai-draw-io-access-code"
@@ -95,6 +97,8 @@ function SettingsContent({
     vlmValidationEnabled = false,
     onVlmValidationChange = () => {},
     onOpenModelConfig,
+    drawioBaseUrl,
+    onDrawioBaseUrlChange,
 }: SettingsDialogProps) {
     const dict = useDictionary()
     const router = useRouter()
@@ -108,6 +112,7 @@ function SettingsContent({
     )
     const [currentLang, setCurrentLang] = useState("en")
     const [sendShortcut, setSendShortcut] = useState("ctrl-enter")
+    const [localDrawioUrl, setLocalDrawioUrl] = useState("")
 
     // Proxy settings state (Electron only)
     const [httpProxy, setHttpProxy] = useState("")
@@ -159,6 +164,14 @@ function SettingsContent({
             )
             setSendShortcut(storedSendShortcut || "ctrl-enter")
 
+            // Load drawio base URL from prop (which already has localStorage value applied)
+            // Fall back to reading localStorage directly as a safety net
+            setLocalDrawioUrl(
+                drawioBaseUrl ||
+                    localStorage.getItem(STORAGE_KEYS.drawioBaseUrl) ||
+                    "",
+            )
+
             setError("")
 
             // Load proxy settings (Electron only)
@@ -169,7 +182,7 @@ function SettingsContent({
                 })
             }
         }
-    }, [open])
+    }, [open, drawioBaseUrl])
 
     const changeLanguage = (lang: string) => {
         // Save locale to localStorage for persistence across restarts
@@ -418,6 +431,47 @@ function SettingsContent({
                                 : dict.settings.minimal}
                         </Button>
                     </SettingItem>
+
+                    {/* DrawIO Instance URL */}
+                    <div className="py-4 first:pt-0 space-y-3">
+                        <div className="space-y-0.5">
+                            <Label className="text-sm font-medium">
+                                {dict.settings.drawioBaseUrl}
+                            </Label>
+                            <p className="text-xs text-muted-foreground max-w-[260px]">
+                                {dict.settings.drawioBaseUrlDescription}
+                            </p>
+                        </div>
+                        <div className="flex gap-2">
+                            <Input
+                                id="drawio-base-url"
+                                type="url"
+                                value={localDrawioUrl}
+                                onChange={(e) =>
+                                    setLocalDrawioUrl(e.target.value)
+                                }
+                                placeholder={
+                                    dict.settings.drawioBaseUrlPlaceholder
+                                }
+                                className="h-9"
+                            />
+                            <Button
+                                onClick={() => {
+                                    if (onDrawioBaseUrlChange) {
+                                        onDrawioBaseUrlChange(
+                                            localDrawioUrl.trim(),
+                                        )
+                                    }
+                                    toast.success(
+                                        dict.settings.drawioBaseUrlSaved,
+                                    )
+                                }}
+                                className="h-9 px-4 rounded-xl shrink-0"
+                            >
+                                {dict.settings.drawioBaseUrlSave}
+                            </Button>
+                        </div>
+                    </div>
 
                     {/* Diagram Style */}
                     <SettingItem

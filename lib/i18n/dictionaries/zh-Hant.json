@@ -121,7 +121,12 @@
         "diagramValidation": "圖表驗證（實驗性）",
         "diagramValidationDescription": "使用視覺語言模型驗證產生的圖表。需要支援視覺的模型，如 GPT-5.2 或 Sonnet-4.5。",
         "enabled": "已啟用",
-        "disabled": "已停用"
+        "disabled": "已停用",
+        "drawioBaseUrl": "DrawIO 實例位址",
+        "drawioBaseUrlDescription": "自托管 DrawIO 的存取位址，儲存於瀏覽器並覆蓋預設值。留空則恢復預設。",
+        "drawioBaseUrlPlaceholder": "http://192.168.1.100:8080",
+        "drawioBaseUrlSave": "套用",
+        "drawioBaseUrlSaved": "DrawIO 實例位址已套用"
     },
     "save": {
         "title": "儲存圖表",

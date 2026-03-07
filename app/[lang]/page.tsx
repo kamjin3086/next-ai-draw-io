@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/resizable"
 import { useDiagram } from "@/contexts/diagram-context"
 import { i18n, type Locale } from "@/lib/i18n/config"
+import { STORAGE_KEYS } from "@/lib/storage"
 
 export default function Home() {
     const { drawioRef, handleDiagramExport, onDrawioLoad, resetDrawioReady } =
@@ -65,11 +66,19 @@ export default function Home() {
             document.documentElement.classList.toggle("dark", prefersDark)
         }
 
+        // Runtime override: check localStorage for user-configured drawio URL
+        // This takes priority over build-time env var, enabling IP/domain switching without rebuild
+        const storedDrawioUrl = localStorage.getItem(STORAGE_KEYS.drawioBaseUrl)
+        if (storedDrawioUrl) {
+            setDrawioBaseUrl(storedDrawioUrl)
+        }
+
         // Detect Electron and use bundled draw.io files for offline use
         // Note: react-drawio uses `new URL(baseUrl)` so we need absolute URL
         // Include /index.html because Next.js doesn't auto-serve index.html for directories
         const electronDetected =
             !process.env.NEXT_PUBLIC_DRAWIO_BASE_URL &&
+            !storedDrawioUrl &&
             !!(window as unknown as { electronAPI?: unknown }).electronAPI
         if (electronDetected) {
             setIsElectron(true)
@@ -97,6 +106,21 @@ export default function Home() {
         const newUi = drawioUi === "min" ? "sketch" : "min"
         localStorage.setItem("drawio-theme", newUi)
         setDrawioUi(newUi)
+        setIsDrawioReady(false)
+        resetDrawioReady()
+    }
+
+    const handleDrawioBaseUrlChange = (url: string) => {
+        if (url) {
+            localStorage.setItem(STORAGE_KEYS.drawioBaseUrl, url)
+        } else {
+            localStorage.removeItem(STORAGE_KEYS.drawioBaseUrl)
+        }
+        setDrawioBaseUrl(
+            url ||
+                process.env.NEXT_PUBLIC_DRAWIO_BASE_URL ||
+                "https://embed.diagrams.net",
+        )
         setIsDrawioReady(false)
         resetDrawioReady()
     }
@@ -236,6 +260,8 @@ export default function Home() {
                                 darkMode={darkMode}
                                 onToggleDarkMode={handleDarkModeChange}
                                 isMobile={isMobile}
+                                drawioBaseUrl={drawioBaseUrl}
+                                onDrawioBaseUrlChange={handleDrawioBaseUrlChange}
                             />
                         </Suspense>
                     </div>

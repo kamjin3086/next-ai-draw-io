@@ -73,6 +73,8 @@ interface ChatPanelProps {
     darkMode: boolean
     onToggleDarkMode: () => void
     isMobile?: boolean
+    drawioBaseUrl?: string
+    onDrawioBaseUrlChange?: (url: string) => void
 }
 
 // Constants for tool states
@@ -114,6 +116,8 @@ export default function ChatPanel({
     darkMode,
     onToggleDarkMode,
     isMobile = false,
+    drawioBaseUrl,
+    onDrawioBaseUrlChange,
 }: ChatPanelProps) {
     const {
         loadDiagram: onDisplayChart,
@@ -1416,6 +1420,8 @@ export default function ChatPanel({
                 vlmValidationEnabled={vlmValidationEnabled}
                 onVlmValidationChange={handleVlmValidationChange}
                 onOpenModelConfig={() => setShowModelConfigDialog(true)}
+                drawioBaseUrl={drawioBaseUrl}
+                onDrawioBaseUrlChange={onDrawioBaseUrlChange}
             />
 
             <ModelConfigDialog

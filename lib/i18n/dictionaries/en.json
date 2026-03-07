@@ -121,7 +121,12 @@
         "diagramValidation": "Diagram Validation (Experimental)",
         "diagramValidationDescription": "Use a vision language model to validate generated diagrams. Requires a VLM like GPT-5.2 or Sonnet-4.5.",
         "enabled": "Enabled",
-        "disabled": "Disabled"
+        "disabled": "Disabled",
+        "drawioBaseUrl": "DrawIO Instance URL",
+        "drawioBaseUrlDescription": "Custom self-hosted DrawIO address. Saved in browser and overrides the default. Clear to restore default.",
+        "drawioBaseUrlPlaceholder": "http://192.168.1.100:8080",
+        "drawioBaseUrlSave": "Apply",
+        "drawioBaseUrlSaved": "DrawIO instance URL applied"
     },
     "save": {
         "title": "Save Diagram",
