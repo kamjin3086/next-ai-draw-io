@@ -42,12 +42,12 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { ScrollArea } from "@/components/ui/scroll-area"
 import {
     Popover,
     PopoverContent,
     PopoverTrigger,
 } from "@/components/ui/popover"
+import { ScrollArea } from "@/components/ui/scroll-area"
 import {
     Select,
     SelectContent,
@@ -345,13 +345,20 @@ export function ModelConfigDialog({
                     }
                     return null
                 })
-                .filter((id): id is string => typeof id === "string" && id.length > 0)
+                .filter(
+                    (id): id is string =>
+                        typeof id === "string" && id.length > 0,
+                )
 
-            setFetchedModels(models)
+            // Deduplicate
+            const uniqueModels = [...new Set(models)]
+            setFetchedModels(uniqueModels)
             setSelectedFetchedModelIds(new Set())
         } catch (error) {
             setFetchModelsError(
-                error instanceof Error ? error.message : "Failed to fetch models",
+                error instanceof Error
+                    ? error.message
+                    : "Failed to fetch models",
             )
         } finally {
             setIsFetchingModels(false)
@@ -1502,11 +1509,11 @@ export function ModelConfigDialog({
                                                         </Button>
                                                     </PopoverTrigger>
                                                     <PopoverContent
-                                                        className="w-72 p-0"
+                                                        className="w-80 p-0 bg-background border border-border shadow-lg rounded-xl flex flex-col max-h-[360px] overflow-hidden"
                                                         align="end"
                                                     >
                                                         {/* Popover Header */}
-                                                        <div className="flex items-center justify-between px-3 py-2 border-b border-border-subtle">
+                                                        <div className="flex items-center justify-between px-3 py-2 border-b border-border-subtle bg-background shrink-0">
                                                             <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
                                                                 {
                                                                     dict
@@ -1561,9 +1568,9 @@ export function ModelConfigDialog({
                                                                 </p>
                                                             </div>
                                                         ) : (
-                                                            <>
+                                                            <div className="flex flex-col overflow-hidden">
                                                                 {/* Select All / Deselect All */}
-                                                                <div className="flex items-center gap-1 px-3 py-1.5 border-b border-border-subtle">
+                                                                <div className="flex items-center gap-1 px-3 py-1.5 border-b border-border-subtle bg-background">
                                                                     <button
                                                                         type="button"
                                                                         className="text-[11px] text-muted-foreground hover:text-foreground px-1.5 py-0.5 rounded transition-colors"
@@ -1614,8 +1621,14 @@ export function ModelConfigDialog({
                                                                     </span>
                                                                 </div>
 
-                                                                {/* Model list */}
-                                                                <ScrollArea className="max-h-52">
+                                                                {/* Model list - scrollable */}
+                                                                <div
+                                                                    className="overflow-y-auto"
+                                                                    style={{
+                                                                        maxHeight:
+                                                                            "240px",
+                                                                    }}
+                                                                >
                                                                     <div className="py-1">
                                                                         {fetchedModels.map(
                                                                             (
@@ -1707,10 +1720,10 @@ export function ModelConfigDialog({
                                                                             },
                                                                         )}
                                                                     </div>
-                                                                </ScrollArea>
+                                                                </div>
 
-                                                                {/* Footer: Add Selected */}
-                                                                <div className="px-3 py-2 border-t border-border-subtle">
+                                                                {/* Footer: Add Selected - always visible */}
+                                                                <div className="px-3 py-2 border-t border-border-subtle bg-background">
                                                                     <Button
                                                                         size="sm"
                                                                         className="w-full h-8 rounded-lg text-xs"
@@ -1750,7 +1763,7 @@ export function ModelConfigDialog({
                                                                         )
                                                                     </Button>
                                                                 </div>
-                                                            </>
+                                                            </div>
                                                         )}
                                                     </PopoverContent>
                                                 </Popover>
