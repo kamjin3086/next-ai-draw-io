@@ -12,6 +12,7 @@ import {
     Link2,
     Loader2,
     Plus,
+    RefreshCw,
     Server,
     Settings2,
     Sparkles,
@@ -42,6 +43,11 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import {
+    Popover,
+    PopoverContent,
+    PopoverTrigger,
+} from "@/components/ui/popover"
 import {
     Select,
     SelectContent,
@@ -181,6 +187,15 @@ export function ModelConfigDialog({
         message: string
     } | null>(null)
 
+    // Fetch-from-API state
+    const [fetchedModels, setFetchedModels] = useState<string[]>([])
+    const [isFetchingModels, setIsFetchingModels] = useState(false)
+    const [fetchModelsError, setFetchModelsError] = useState("")
+    const [showModelFetcher, setShowModelFetcher] = useState(false)
+    const [selectedFetchedModelIds, setSelectedFetchedModelIds] = useState<
+        Set<string>
+    >(new Set())
+
     const {
         config,
         addProvider,
@@ -204,6 +219,14 @@ export function ModelConfigDialog({
             }
         }
     }, [])
+
+    // Reset fetch-models state when switching providers
+    useEffect(() => {
+        setFetchedModels([])
+        setFetchModelsError("")
+        setSelectedFetchedModelIds(new Set())
+        setShowModelFetcher(false)
+    }, [selectedProviderId])
 
     // Get suggested models for current provider
     const suggestedModels = selectedProvider
@@ -274,6 +297,66 @@ export function ModelConfigDialog({
         setValidationStatus("idle")
         setDeleteConfirmOpen(false)
     }
+
+    // Fetch available models from the provider's /models endpoint
+    const handleFetchModels = useCallback(async () => {
+        if (!selectedProvider) return
+
+        const rawBaseUrl =
+            selectedProvider.baseUrl ||
+            PROVIDER_INFO[selectedProvider.provider].defaultBaseUrl
+        if (!rawBaseUrl) {
+            setFetchModelsError("No base URL configured")
+            return
+        }
+
+        const modelsUrl = `${rawBaseUrl.replace(/\/+$/, "")}/models`
+
+        setIsFetchingModels(true)
+        setFetchModelsError("")
+        setFetchedModels([])
+
+        try {
+            const headers: Record<string, string> = {}
+            if (selectedProvider.apiKey) {
+                headers["Authorization"] = `Bearer ${selectedProvider.apiKey}`
+            }
+
+            const response = await fetch(modelsUrl, { headers })
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`)
+            }
+
+            const data = await response.json()
+            // Standard OpenAI format: { data: [{ id: "model-name" }, ...] }
+            // Also handle flat arrays
+            const rawList: unknown[] = Array.isArray(data)
+                ? data
+                : (data.data ?? data.models ?? [])
+            const models = rawList
+                .map((m: unknown) => {
+                    if (typeof m === "string") return m
+                    if (typeof m === "object" && m !== null) {
+                        const obj = m as Record<string, unknown>
+                        return (
+                            (typeof obj.id === "string" ? obj.id : null) ??
+                            (typeof obj.name === "string" ? obj.name : null)
+                        )
+                    }
+                    return null
+                })
+                .filter((id): id is string => typeof id === "string" && id.length > 0)
+
+            setFetchedModels(models)
+            setSelectedFetchedModelIds(new Set())
+        } catch (error) {
+            setFetchModelsError(
+                error instanceof Error ? error.message : "Failed to fetch models",
+            )
+        } finally {
+            setIsFetchingModels(false)
+        }
+    }, [selectedProvider])
 
     // Validate all models
     const handleValidate = useCallback(async () => {
@@ -1383,6 +1466,294 @@ export function ModelConfigDialog({
                                                         )}
                                                     </SelectContent>
                                                 </Select>
+
+                                                {/* Fetch from API Popover */}
+                                                <Popover
+                                                    open={showModelFetcher}
+                                                    onOpenChange={(open) => {
+                                                        setShowModelFetcher(
+                                                            open,
+                                                        )
+                                                        if (open) {
+                                                            handleFetchModels()
+                                                        }
+                                                    }}
+                                                >
+                                                    <PopoverTrigger asChild>
+                                                        <Button
+                                                            variant="outline"
+                                                            size="sm"
+                                                            className="h-8 rounded-lg"
+                                                        >
+                                                            <RefreshCw
+                                                                className={cn(
+                                                                    "h-3.5 w-3.5 mr-1",
+                                                                    isFetchingModels &&
+                                                                        "animate-spin",
+                                                                )}
+                                                            />
+                                                            <span className="text-xs">
+                                                                {
+                                                                    dict
+                                                                        .modelConfig
+                                                                        .fetchFromApi
+                                                                }
+                                                            </span>
+                                                        </Button>
+                                                    </PopoverTrigger>
+                                                    <PopoverContent
+                                                        className="w-72 p-0"
+                                                        align="end"
+                                                    >
+                                                        {/* Popover Header */}
+                                                        <div className="flex items-center justify-between px-3 py-2 border-b border-border-subtle">
+                                                            <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                                                                {
+                                                                    dict
+                                                                        .modelConfig
+                                                                        .fetchedModelsTitle
+                                                                }
+                                                            </span>
+                                                            <button
+                                                                type="button"
+                                                                onClick={
+                                                                    handleFetchModels
+                                                                }
+                                                                disabled={
+                                                                    isFetchingModels
+                                                                }
+                                                                className="p-1 rounded text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+                                                                aria-label="Refresh model list"
+                                                            >
+                                                                <RefreshCw
+                                                                    className={cn(
+                                                                        "h-3.5 w-3.5",
+                                                                        isFetchingModels &&
+                                                                            "animate-spin",
+                                                                    )}
+                                                                />
+                                                            </button>
+                                                        </div>
+
+                                                        {/* Popover Body */}
+                                                        {isFetchingModels ? (
+                                                            <div className="flex items-center justify-center py-8">
+                                                                <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                                                            </div>
+                                                        ) : fetchModelsError ? (
+                                                            <div className="px-3 py-5 text-center space-y-1">
+                                                                <AlertCircle className="h-5 w-5 text-destructive mx-auto" />
+                                                                <p className="text-xs text-destructive">
+                                                                    {
+                                                                        fetchModelsError
+                                                                    }
+                                                                </p>
+                                                            </div>
+                                                        ) : fetchedModels.length ===
+                                                          0 ? (
+                                                            <div className="px-3 py-5 text-center">
+                                                                <p className="text-xs text-muted-foreground">
+                                                                    {
+                                                                        dict
+                                                                            .modelConfig
+                                                                            .noModelsFound
+                                                                    }
+                                                                </p>
+                                                            </div>
+                                                        ) : (
+                                                            <>
+                                                                {/* Select All / Deselect All */}
+                                                                <div className="flex items-center gap-1 px-3 py-1.5 border-b border-border-subtle">
+                                                                    <button
+                                                                        type="button"
+                                                                        className="text-[11px] text-muted-foreground hover:text-foreground px-1.5 py-0.5 rounded transition-colors"
+                                                                        onClick={() =>
+                                                                            setSelectedFetchedModelIds(
+                                                                                new Set(
+                                                                                    fetchedModels.filter(
+                                                                                        (
+                                                                                            m,
+                                                                                        ) =>
+                                                                                            !existingModelIds.includes(
+                                                                                                m,
+                                                                                            ),
+                                                                                    ),
+                                                                                ),
+                                                                            )
+                                                                        }
+                                                                    >
+                                                                        {
+                                                                            dict
+                                                                                .modelConfig
+                                                                                .selectAll
+                                                                        }
+                                                                    </button>
+                                                                    <span className="text-muted-foreground/50 text-[11px]">
+                                                                        /
+                                                                    </span>
+                                                                    <button
+                                                                        type="button"
+                                                                        className="text-[11px] text-muted-foreground hover:text-foreground px-1.5 py-0.5 rounded transition-colors"
+                                                                        onClick={() =>
+                                                                            setSelectedFetchedModelIds(
+                                                                                new Set(),
+                                                                            )
+                                                                        }
+                                                                    >
+                                                                        {
+                                                                            dict
+                                                                                .modelConfig
+                                                                                .deselectAll
+                                                                        }
+                                                                    </button>
+                                                                    <span className="ml-auto text-[11px] text-muted-foreground">
+                                                                        {
+                                                                            fetchedModels.length
+                                                                        }{" "}
+                                                                        models
+                                                                    </span>
+                                                                </div>
+
+                                                                {/* Model list */}
+                                                                <ScrollArea className="max-h-52">
+                                                                    <div className="py-1">
+                                                                        {fetchedModels.map(
+                                                                            (
+                                                                                modelId,
+                                                                            ) => {
+                                                                                const isAlreadyAdded =
+                                                                                    existingModelIds.includes(
+                                                                                        modelId,
+                                                                                    )
+                                                                                const isChecked =
+                                                                                    selectedFetchedModelIds.has(
+                                                                                        modelId,
+                                                                                    ) ||
+                                                                                    isAlreadyAdded
+                                                                                return (
+                                                                                    <button
+                                                                                        key={
+                                                                                            modelId
+                                                                                        }
+                                                                                        type="button"
+                                                                                        disabled={
+                                                                                            isAlreadyAdded
+                                                                                        }
+                                                                                        onClick={() => {
+                                                                                            if (
+                                                                                                isAlreadyAdded
+                                                                                            )
+                                                                                                return
+                                                                                            setSelectedFetchedModelIds(
+                                                                                                (
+                                                                                                    prev,
+                                                                                                ) => {
+                                                                                                    const next =
+                                                                                                        new Set(
+                                                                                                            prev,
+                                                                                                        )
+                                                                                                    if (
+                                                                                                        next.has(
+                                                                                                            modelId,
+                                                                                                        )
+                                                                                                    )
+                                                                                                        next.delete(
+                                                                                                            modelId,
+                                                                                                        )
+                                                                                                    else
+                                                                                                        next.add(
+                                                                                                            modelId,
+                                                                                                        )
+                                                                                                    return next
+                                                                                                },
+                                                                                            )
+                                                                                        }}
+                                                                                        className={cn(
+                                                                                            "w-full flex items-center gap-2 px-3 py-1.5 text-left transition-colors",
+                                                                                            "hover:bg-interactive-hover",
+                                                                                            isAlreadyAdded &&
+                                                                                                "opacity-50 cursor-not-allowed",
+                                                                                        )}
+                                                                                    >
+                                                                                        {/* Checkbox */}
+                                                                                        <div
+                                                                                            className={cn(
+                                                                                                "w-3.5 h-3.5 rounded border flex-shrink-0 flex items-center justify-center transition-colors",
+                                                                                                isChecked
+                                                                                                    ? "bg-primary border-primary"
+                                                                                                    : "border-border-subtle bg-background",
+                                                                                            )}
+                                                                                        >
+                                                                                            {isChecked && (
+                                                                                                <Check className="h-2.5 w-2.5 text-primary-foreground" />
+                                                                                            )}
+                                                                                        </div>
+                                                                                        <span className="font-mono text-xs truncate flex-1">
+                                                                                            {
+                                                                                                modelId
+                                                                                            }
+                                                                                        </span>
+                                                                                        {isAlreadyAdded && (
+                                                                                            <span className="text-[10px] text-muted-foreground shrink-0">
+                                                                                                {
+                                                                                                    dict
+                                                                                                        .modelConfig
+                                                                                                        .inList
+                                                                                                }
+                                                                                            </span>
+                                                                                        )}
+                                                                                    </button>
+                                                                                )
+                                                                            },
+                                                                        )}
+                                                                    </div>
+                                                                </ScrollArea>
+
+                                                                {/* Footer: Add Selected */}
+                                                                <div className="px-3 py-2 border-t border-border-subtle">
+                                                                    <Button
+                                                                        size="sm"
+                                                                        className="w-full h-8 rounded-lg text-xs"
+                                                                        disabled={
+                                                                            selectedFetchedModelIds.size ===
+                                                                            0
+                                                                        }
+                                                                        onClick={() => {
+                                                                            for (const modelId of selectedFetchedModelIds) {
+                                                                                if (
+                                                                                    !existingModelIds.includes(
+                                                                                        modelId,
+                                                                                    )
+                                                                                ) {
+                                                                                    handleAddModel(
+                                                                                        modelId,
+                                                                                    )
+                                                                                }
+                                                                            }
+                                                                            setSelectedFetchedModelIds(
+                                                                                new Set(),
+                                                                            )
+                                                                            setShowModelFetcher(
+                                                                                false,
+                                                                            )
+                                                                        }}
+                                                                    >
+                                                                        {
+                                                                            dict
+                                                                                .modelConfig
+                                                                                .addSelected
+                                                                        }{" "}
+                                                                        (
+                                                                        {
+                                                                            selectedFetchedModelIds.size
+                                                                        }
+                                                                        )
+                                                                    </Button>
+                                                                </div>
+                                                            </>
+                                                        )}
+                                                    </PopoverContent>
+                                                </Popover>
                                             </div>
                                         }
                                     >

@@ -345,6 +345,12 @@
         "showUnvalidatedModels": "未検証のモデルを表示",
         "allModelsShown": "すべてのモデルを表示（未検証を含む）",
         "unvalidatedModelWarning": "このモデルは検証されていません",
-        "serverDefaultModel": "サーバーデフォルトモデル"
+        "serverDefaultModel": "サーバーデフォルトモデル",
+        "fetchFromApi": "取得",
+        "fetchedModelsTitle": "利用可能なモデル",
+        "addSelected": "選択して追加",
+        "selectAll": "全選択",
+        "deselectAll": "クリア",
+        "inList": "追加済み"
     }
 }
