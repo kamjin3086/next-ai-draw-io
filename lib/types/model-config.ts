@@ -16,6 +16,12 @@ export type ProviderName =
     | "edgeone"
     | "doubao"
     | "modelscope"
+    | "glm"
+    | "qwen"
+    | "qiniu"
+    | "kimi"
+    | "minimax"
+    | "novita"
 
 // Individual model configuration
 export interface ModelConfig {
@@ -79,6 +85,26 @@ export interface FlattenedModel {
     baseUrlEnv?: string
 }
 
+// Map provider names to models.dev logo names
+export const PROVIDER_LOGO_MAP: Record<string, string> = {
+    openai: "openai",
+    anthropic: "anthropic",
+    google: "google",
+    azure: "azure",
+    bedrock: "amazon-bedrock",
+    openrouter: "openrouter",
+    deepseek: "deepseek",
+    siliconflow: "siliconflow",
+    sglang: "openai", // SGLang is OpenAI-compatible
+    gateway: "vercel",
+    edgeone: "tencent-cloud",
+    vertexai: "google",
+    doubao: "bytedance",
+    modelscope: "modelscope",
+    minimax: "minimax",
+    novita: "novita",
+}
+
 // Provider metadata
 export const PROVIDER_INFO: Record<
     ProviderName,
@@ -134,6 +160,30 @@ export const PROVIDER_INFO: Record<
     modelscope: {
         label: "ModelScope",
         defaultBaseUrl: "https://api-inference.modelscope.cn/v1",
+    },
+    glm: {
+        label: "GLM (Zhipu)",
+        defaultBaseUrl: "https://open.bigmodel.cn/api/paas/v4",
+    },
+    qwen: {
+        label: "Qwen (Alibaba)",
+        defaultBaseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    },
+    qiniu: {
+        label: "Qiniu",
+        defaultBaseUrl: "https://api.qnaigc.com/v1",
+    },
+    kimi: {
+        label: "Kimi (Moonshot)",
+        defaultBaseUrl: "https://api.moonshot.cn/v1",
+    },
+    minimax: {
+        label: "MiniMax",
+        defaultBaseUrl: "https://api.minimaxi.com/anthropic",
+    },
+    novita: {
+        label: "Novita AI",
+        defaultBaseUrl: "https://api.novita.ai/openai",
     },
 }
 
@@ -298,6 +348,19 @@ export const SUGGESTED_MODELS: Partial<Record<ProviderName, string[]>> = {
         // DeepSeek
         "deepseek-ai/DeepSeek-R1-0528",
         "deepseek-ai/DeepSeek-V3.2",
+    ],
+    minimax: [
+        // MiniMax models (Anthropic-compatible API)
+        "MiniMax-M2.7",
+        "MiniMax-M2.7-highspeed",
+        "MiniMax-M2.5",
+        "MiniMax-M2.5-highspeed",
+    ],
+    novita: [
+        // Novita AI models (OpenAI-compatible API)
+        "moonshotai/kimi-k2.5",
+        "zai-org/glm-5",
+        "minimax/minimax-m2.5",
     ],
 }
 

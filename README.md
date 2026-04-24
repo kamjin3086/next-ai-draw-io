@@ -19,7 +19,7 @@ English | [中文](./docs/cn/README_CN.md) | [日本語](./docs/ja/README_JA.md)
 
 A Next.js web application that integrates AI capabilities with draw.io diagrams. Create, modify, and enhance diagrams through natural language commands and AI-assisted visualization.
 
-> Note: Thanks to <img src="https://raw.githubusercontent.com/DayuanJiang/next-ai-draw-io/main/public/doubao-color.png" alt="" height="20" /> [ByteDance Doubao](https://www.volcengine.com/activity/newyear-referral?utm_campaign=doubao&utm_content=aidrawio&utm_medium=github&utm_source=coopensrc&utm_term=project) sponsorship, the demo site now uses the powerful K2-thinking model!
+> Note: Thanks to <img src="https://raw.githubusercontent.com/DayuanJiang/next-ai-draw-io/main/public/doubao-color.png" alt="" height="20" /> [ByteDance Doubao](https://www.volcengine.com/activity/codingplan?ac=MMAP8JTTCAQ2&rc=Z9Z3LDTJ&utm_campaign=drawio&utm_content=drawio&utm_medium=devrel&utm_source=OWO&utm_term=drawio) sponsorship, the demo site now uses the powerful glm-4.7 model!
 
 
 https://github.com/user-attachments/assets/9d60a3e8-4a1c-4b5e-acbb-26af2d3eabd1
@@ -31,7 +31,7 @@ https://github.com/user-attachments/assets/9d60a3e8-4a1c-4b5e-acbb-26af2d3eabd1
   - [Table of Contents](#table-of-contents)
   - [Examples](#examples)
   - [Features](#features)
-  - [MCP Server (Preview)](#mcp-server-preview)
+  - [MCP Server](#mcp-server)
     - [Claude Code CLI](#claude-code-cli)
   - [Getting Started](#getting-started)
     - [Try it Online](#try-it-online)
@@ -63,24 +63,24 @@ Here are some example prompts and their generated diagrams:
   </tr>
   <tr>
     <td width="50%" valign="top">
-      <strong>GCP architecture diagram</strong><br />
-      <p><strong>Prompt:</strong> Generate a GCP architecture diagram with **GCP icons**. In this diagram, users connect to a frontend hosted on an instance.</p>
-      <img src="./public/gcp_demo.svg" alt="GCP Architecture Diagram" width="480" />
+      <strong>RAG Technique Diagram</strong><br />
+      <p><strong>Prompt:</strong> Generate a RAG architecture diagram for **chat application**. Use connected diagram for data ingestion</p>
+      <img src="./public/rag_prod.svg" alt="RAG Architecture Diagram" width="480" />
     </td>
     <td width="50%" valign="top">
-      <strong>AWS architecture diagram</strong><br />
-      <p><strong>Prompt:</strong> Generate a AWS architecture diagram with **AWS icons**. In this diagram, users connect to a frontend hosted on an instance.</p>
-      <img src="./public/aws_demo.svg" alt="AWS Architecture Diagram" width="480" />
+      <strong>Authentication using React and AWS</strong><br />
+      <p><strong>Prompt:</strong> Generate authentication process using React with **AWS**. Use Serverless architecture.</p>
+      <img src="./public/auth.svg" alt="Authentication Architecture Diagram" width="480" />
     </td>
   </tr>
   <tr>
     <td width="50%" valign="top">
-      <strong>Azure architecture diagram</strong><br />
-      <p><strong>Prompt:</strong> Generate a Azure architecture diagram with **Azure icons**. In this diagram, users connect to a frontend hosted on an instance.</p>
-      <img src="./public/azure_demo.svg" alt="Azure Architecture Diagram" width="480" />
+      <strong>Open Innovation</strong><br />
+      <p><strong>Prompt:</strong> Create visualization of Henry Chesbrough's Open Innovation model.</p>
+      <img src="./public/inno.svg" alt="Open Innovation Diagram" width="480" />
     </td>
     <td width="50%" valign="top">
-      <strong>Cat sketch prompt</strong><br />
+      <strong>Cat sketch</strong><br />
       <p><strong>Prompt:</strong> Draw a cute cat for me.</p>
       <img src="./public/cat_demo.svg" alt="Cat Drawing" width="240" />
     </td>
@@ -99,9 +99,7 @@ Here are some example prompts and their generated diagrams:
 -   **Cloud Architecture Diagram Support**: Specialized support for generating cloud architecture diagrams (AWS, GCP, Azure)
 -   **Animated Connectors**: Create dynamic and animated connectors between diagram elements for better visualization
 
-## MCP Server (Preview)
-
-> **Preview Feature**: This feature is experimental and may not be stable.
+## MCP Server
 
 Use Next AI Draw.io with AI agents like Claude Desktop, Cursor, and VS Code via MCP (Model Context Protocol).
 
@@ -202,7 +200,7 @@ See the [Next.js deployment documentation](https://nextjs.org/docs/app/building-
 
 ## Multi-Provider Support
 
--   [ByteDance Doubao](https://www.volcengine.com/activity/newyear-referral?utm_campaign=doubao&utm_content=aidrawio&utm_medium=github&utm_source=coopensrc&utm_term=project)
+-   [ByteDance Doubao](https://www.volcengine.com/activity/codingplan?ac=MMAP8JTTCAQ2&rc=Z9Z3LDTJ&utm_campaign=drawio&utm_content=drawio&utm_medium=devrel&utm_source=OWO&utm_term=drawio)
 -   AWS Bedrock (default)
 -   OpenAI
 -   Anthropic
@@ -244,7 +242,7 @@ Diagrams are represented as XML that can be rendered in draw.io. The AI processe
 
 ## Support & Contact
 
-**Special thanks to [ByteDance Doubao](https://www.volcengine.com/activity/newyear-referral?utm_campaign=doubao&utm_content=aidrawio&utm_medium=github&utm_source=coopensrc&utm_term=project) for sponsoring the API token usage of the demo site!** Register on the ARK platform to get 500K free tokens for all models!
+**Special thanks to [ByteDance Doubao](https://www.volcengine.com/activity/codingplan?ac=MMAP8JTTCAQ2&rc=Z9Z3LDTJ&utm_campaign=drawio&utm_content=drawio&utm_medium=devrel&utm_source=OWO&utm_term=drawio) for sponsoring the API token usage of the demo site!** Register on the ARK platform to get 500K free tokens for all models!
 
 If you find this project useful, please consider [sponsoring](https://github.com/sponsors/DayuanJiang) to help me host the live demo site!
 

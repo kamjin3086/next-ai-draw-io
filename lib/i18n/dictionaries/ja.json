@@ -29,7 +29,12 @@
         "openrouter": "OpenRouter",
         "deepseek": "DeepSeek",
         "siliconflow": "SiliconFlow",
-        "modelscope": "ModelScope"
+        "modelscope": "ModelScope",
+        "minimax": "MiniMax",
+        "glm": "GLM",
+        "qwen": "Qwen",
+        "kimi": "Kimi",
+        "qiniu": "Qiniu"
     },
     "chat": {
         "placeholder": "ダイアグラムを説明するか、ファイルをアップロード...",
@@ -71,8 +76,7 @@
         "creativeDescription": "楽しくてクリエイティブなものを描く",
         "cachedNote": "例はキャッシュされ、即座に応答します",
         "mcpServer": "MCP サーバー",
-        "mcpDescription": "Claude Desktop、VS Code、Cursor で使用",
-        "preview": "プレビュー"
+        "mcpDescription": "Claude Desktop、VS Code、Cursor で使用"
     },
     "settings": {
         "title": "設定",
@@ -126,7 +130,15 @@
         "drawioBaseUrlDescription": "セルフホスト DrawIO のアドレス。ブラウザに保存されデフォルト値を上書きします。空にするとデフォルトに戻ります。",
         "drawioBaseUrlPlaceholder": "http://192.168.1.100:8080",
         "drawioBaseUrlSave": "適用",
-        "drawioBaseUrlSaved": "DrawIO インスタンス URL を適用しました"
+        "drawioBaseUrlSaved": "DrawIO インスタンス URL を適用しました",
+        "customSystemMessage": "カスタムシステムメッセージ",
+        "customSystemMessageDescription": "AIのシステムプロンプトに追加されるカスタム指示を入力します。",
+        "customSystemMessagePlaceholder": "例：ダイアグラムには常に青色のカラースキームを使用...",
+        "panelVisibility": "ロビーパネル",
+        "panelVisibilityDescription": "チャットロビーに表示するパネルを選択します。",
+        "showRecentChats": "最近のチャット",
+        "showMyTemplates": "マイテンプレート",
+        "showQuickExamples": "クイック例"
     },
     "save": {
         "title": "ダイアグラムを保存",
@@ -137,7 +149,8 @@
         "formats": {
             "drawio": "Draw.io XML",
             "png": "PNG 画像",
-            "svg": "SVG 画像"
+            "svg": "SVG 画像",
+            "xmlsvg": "編集可能 SVG"
         },
         "savedSuccessfully": "保存完了！"
     },
@@ -314,6 +327,7 @@
         "optional": "（オプション）",
         "baseUrlWithExample": "ベース URL（オプション、例: {example}）",
         "customEndpoint": "カスタムエンドポイント URL",
+        "minimaxBaseUrlHint": "/anthropic で Anthropic 互換 API（推奨）、または /v1 で OpenAI 互換 API を使用",
         "models": "モデル",
         "customModelId": "カスタムモデル ID...",
         "allAdded": "すべて追加済み",
@@ -352,5 +366,51 @@
         "selectAll": "全選択",
         "deselectAll": "クリア",
         "inList": "追加済み"
+    },
+    "templates": {
+        "title": "マイテンプレート",
+        "subtitle": "素早いダイアグラム作成のための個人的なプロンプトライブラリ",
+        "emptyTitle": "テンプレートがありません",
+        "emptyDescription": "最初のテンプレートを作成して、個人的なプロンプトライブラリを構築しましょう",
+        "createFirst": "最初のテンプレートを作成",
+        "neverUsed": "未使用",
+        "usedCount": "{count} 回使用",
+        "myTemplates": "マイテンプレート",
+        "createTitle": "テンプレート作成",
+        "createDescription": "再利用のためにプロンプトを保存します。テンプレートを使用すると、一般的なワークフローを素早く開始できます。",
+        "promptLabel": "プロンプト",
+        "promptPlaceholder": "作成するダイアグラムを説明してください...",
+        "promptRequired": "プロンプトは必須です",
+        "titleLabel": "タイトル",
+        "titlePlaceholder": "タイトルを入力",
+        "titleHint": "空欄の場合はプロンプトの最初の20文字が使用されます",
+        "descriptionLabel": "説明",
+        "descriptionPlaceholder": "このテンプレートの説明を追加",
+        "pinnedLabel": "テンプレートをピン留め",
+        "pinnedHint": "ピン留めされたテンプレートはリストの上部に表示されます",
+        "createButton": "テンプレート作成",
+        "createFailed": "テンプレートの作成に失敗しました。もう一度お試しください。",
+        "editTitle": "テンプレート編集",
+        "editDescription": "テンプレートの内容と設定を更新します。",
+        "updateFailed": "テンプレートの更新に失敗しました。もう一度お試しください。",
+        "duplicate": "複製",
+        "copySuffix": "(コピー)",
+        "deleteTitle": "このテンプレートを削除しますか？",
+        "deleteDescription": "このテンプレートは完全に削除されます。この操作は取り消せません。",
+        "confirmSendTitle": "現在の入力を置き換えますか？",
+        "confirmSendDescription": "未送信のコンテンツがあります。このテンプレートを送信すると置き換えられます。",
+        "confirmSendButton": "テンプレートを送信",
+        "searchPlaceholder": "テンプレートを検索...",
+        "searchNoResults": "検索に一致するテンプレートがありません",
+        "pin": "上部にピン留め",
+        "unpin": "ピン留め解除",
+        "saveAsTemplate": "テンプレートとして保存",
+        "exportTemplates": "テンプレートをエクスポート",
+        "importTemplates": "テンプレートをインポート",
+        "exportEmpty": "エクスポートするテンプレートがありません",
+        "exportSuccess": "{count} 件のテンプレートをエクスポートしました",
+        "importNoFile": "JSON ファイルを選択してください",
+        "importFailed": "インポートに失敗しました：{error}",
+        "importSuccess": "{imported} 件インポート、{skipped} 件の重複をスキップしました"
     }
 }

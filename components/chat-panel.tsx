@@ -142,26 +142,22 @@ export default function ChatPanel({
     const onFetchChart = (saveToHistory = true) => {
         return Promise.race([
             new Promise<string>((resolve) => {
-                if (resolverRef && "current" in resolverRef) {
-                    resolverRef.current = resolve
-                }
+                resolverRef.current = resolve
                 if (saveToHistory) {
                     onExport()
                 } else {
                     handleExportWithoutHistory()
                 }
             }),
-            new Promise<string>((_, reject) =>
-                setTimeout(
-                    () =>
-                        reject(
-                            new Error(
-                                "Chart export timed out after 10 seconds",
-                            ),
-                        ),
-                    10000,
-                ),
-            ),
+            new Promise<string>((_, reject) => {
+                const currentResolver = resolverRef.current
+                setTimeout(() => {
+                    if (resolverRef.current === currentResolver) {
+                        resolverRef.current = null
+                    }
+                    reject(new Error("Chart export timed out after 10 seconds"))
+                }, 10000)
+            }),
         ])
     }
 
@@ -184,6 +180,7 @@ export default function ChatPanel({
     const [tpmLimit, setTpmLimit] = useState(0)
     const [minimalStyle, setMinimalStyle] = useState(false)
     const [vlmValidationEnabled, setVlmValidationEnabled] = useState(false)
+    const [customSystemMessage, setCustomSystemMessage] = useState("")
     const [shouldFocusInput, setShouldFocusInput] = useState(false)
 
     // Restore input from sessionStorage on mount (when ChatPanel remounts due to key change)
@@ -199,6 +196,14 @@ export default function ChatPanel({
         const stored = localStorage.getItem(STORAGE_KEYS.vlmValidationEnabled)
         if (stored !== null) {
             setVlmValidationEnabled(stored === "true")
+        }
+    }, [])
+
+    // Load custom system message from localStorage on mount
+    useEffect(() => {
+        const stored = localStorage.getItem(STORAGE_KEYS.customSystemMessage)
+        if (stored !== null) {
+            setCustomSystemMessage(stored)
         }
     }, [])
 
@@ -310,6 +315,12 @@ export default function ChatPanel({
     const handleVlmValidationChange = useCallback((value: boolean) => {
         setVlmValidationEnabled(value)
         localStorage.setItem(STORAGE_KEYS.vlmValidationEnabled, String(value))
+    }, [])
+
+    // Handler for custom system message change
+    const handleCustomSystemMessageChange = useCallback((value: string) => {
+        setCustomSystemMessage(value)
+        localStorage.setItem(STORAGE_KEYS.customSystemMessage, value)
     }, [])
 
     // Ref to store the sendMessage function for use in callbacks
@@ -594,7 +605,7 @@ export default function ChatPanel({
 
         try {
             const currentSession = sessionManager.currentSession
-            if (currentSession && currentSession.messages.length > 0) {
+            if (currentSession) {
                 // Restore from session manager (IndexedDB)
                 justLoadedSessionRef.current = true
                 syncUIWithSession(currentSession)
@@ -631,7 +642,7 @@ export default function ChatPanel({
         lastSyncedSessionIdRef.current = newSessionId
 
         // Sync UI with new session
-        if (newSession && newSession.messages.length > 0) {
+        if (newSession) {
             justLoadedSessionRef.current = true
             syncUIWithSession(newSession)
         } else if (!newSession) {
@@ -686,7 +697,7 @@ export default function ChatPanel({
         // Debounce: save after 1 second of no changes
         localStorageDebounceRef.current = setTimeout(async () => {
             try {
-                if (messages.length > 0) {
+                if (messages.length > 0 || hasDiagramNow) {
                     const sessionData = await buildSessionData({
                         // Only capture thumbnail if there was a diagram AND this isn't a no-diagram session
                         withThumbnail: hasDiagramNow && !isNodiagramSession,
@@ -708,6 +719,7 @@ export default function ChatPanel({
             }
         }
     }, [
+        chartXML,
         messages,
         status,
         sessionIsAvailable,
@@ -738,7 +750,8 @@ export default function ChatPanel({
         const handleVisibilityChange = async () => {
             if (
                 document.visibilityState === "hidden" &&
-                messagesRef.current.length > 0
+                (messagesRef.current.length > 0 ||
+                    isRealDiagram(chartXMLRef.current))
             ) {
                 try {
                     // Attempt to save session - browser may not wait for completion
@@ -964,6 +977,25 @@ export default function ChatPanel({
         pathname,
     ])
 
+    // Handle sending a template directly (called from TemplatePanel)
+    const handleSendTemplate = useCallback(
+        async (template: { prompt: string }) => {
+            flushSync(() => {
+                setInput(template.prompt)
+                setFiles([])
+                setUrlData(new Map())
+            })
+
+            const formElement = document.getElementById(
+                "chat-form",
+            ) as HTMLFormElement | null
+            if (formElement) {
+                formElement.requestSubmit()
+            }
+        },
+        [setInput, setFiles, setUrlData],
+    )
+
     const handleInputChange = (
         e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
     ) => {
@@ -1041,7 +1073,7 @@ export default function ChatPanel({
         sendMessage(
             { parts },
             {
-                body: { xml, previousXml, sessionId },
+                body: { xml, previousXml, sessionId, customSystemMessage },
                 headers: {
                     "x-access-code": config.accessCode,
                     ...(config.aiProvider && {
@@ -1367,6 +1399,8 @@ export default function ChatPanel({
                     loadedMessageIdsRef={loadedMessageIdsRef}
                     validationStates={validationStates}
                     onImproveWithSuggestions={handleImproveWithSuggestions}
+                    onSendTemplate={handleSendTemplate}
+                    currentInput={input}
                 />
             </main>
 
@@ -1419,6 +1453,8 @@ export default function ChatPanel({
                 onMinimalStyleChange={setMinimalStyle}
                 vlmValidationEnabled={vlmValidationEnabled}
                 onVlmValidationChange={handleVlmValidationChange}
+                customSystemMessage={customSystemMessage}
+                onCustomSystemMessageChange={handleCustomSystemMessageChange}
                 onOpenModelConfig={() => setShowModelConfigDialog(true)}
                 drawioBaseUrl={drawioBaseUrl}
                 onDrawioBaseUrlChange={onDrawioBaseUrlChange}

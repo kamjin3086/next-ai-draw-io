@@ -4,6 +4,29 @@
  */
 
 import http from "node:http"
+
+const MAX_BODY_BYTES = 10 * 1024 * 1024 // 10 MiB
+
+function readBody(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+    cb: (body: string) => void,
+): void {
+    let body = ""
+    let size = 0
+    req.on("data", (chunk: Buffer) => {
+        size += chunk.length
+        if (size > MAX_BODY_BYTES) {
+            res.writeHead(413, { "Content-Type": "application/json" })
+            res.end(JSON.stringify({ error: "Payload too large" }))
+            req.destroy()
+            return
+        }
+        body += chunk
+    })
+    req.on("end", () => cb(body))
+}
+
 import {
     addHistory,
     clearHistory,
@@ -155,7 +178,7 @@ export function startHttpServer(port = 6002): Promise<number> {
             }
         })
 
-        server.listen(port, () => {
+        server.listen(port, "127.0.0.1", () => {
             serverPort = port
             log.info(`HTTP server running on http://localhost:${port}`)
             resolve(port)
@@ -198,9 +221,12 @@ function handleRequest(
 ): void {
     const url = new URL(req.url || "/", `http://localhost:${serverPort}`)
 
-    res.setHeader("Access-Control-Allow-Origin", "*")
-    res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type")
+    const requestOrigin = req.headers.origin
+    if (requestOrigin === `http://localhost:${serverPort}`) {
+        res.setHeader("Access-Control-Allow-Origin", requestOrigin)
+        res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        res.setHeader("Access-Control-Allow-Headers", "Content-Type")
+    }
 
     if (req.method === "OPTIONS") {
         res.writeHead(204)
@@ -263,11 +289,7 @@ function handleStateApi(
             }),
         )
     } else if (req.method === "POST") {
-        let body = ""
-        req.on("data", (chunk) => {
-            body += chunk
-        })
-        req.on("end", () => {
+        readBody(req, res, (body) => {
             try {
                 const data = JSON.parse(body)
                 const { sessionId } = data
@@ -344,11 +366,7 @@ function handleRestoreApi(
         return
     }
 
-    let body = ""
-    req.on("data", (chunk) => {
-        body += chunk
-    })
-    req.on("end", () => {
+    readBody(req, res, (body) => {
         try {
             const { sessionId, index } = JSON.parse(body)
             if (!sessionId || index === undefined) {
@@ -390,11 +408,7 @@ function handleHistorySvgApi(
         return
     }
 
-    let body = ""
-    req.on("data", (chunk) => {
-        body += chunk
-    })
-    req.on("end", () => {
+    readBody(req, res, (body) => {
         try {
             const { sessionId, svg } = JSON.parse(body)
             if (!sessionId || !svg) {

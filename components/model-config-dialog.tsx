@@ -60,7 +60,11 @@ import { useDictionary } from "@/hooks/use-dictionary"
 import type { UseModelConfigReturn } from "@/hooks/use-model-config"
 import { formatMessage } from "@/lib/i18n/utils"
 import type { ProviderConfig, ProviderName } from "@/lib/types/model-config"
-import { PROVIDER_INFO, SUGGESTED_MODELS } from "@/lib/types/model-config"
+import {
+    PROVIDER_INFO,
+    PROVIDER_LOGO_MAP,
+    SUGGESTED_MODELS,
+} from "@/lib/types/model-config"
 import { cn } from "@/lib/utils"
 
 interface ModelConfigDialogProps {
@@ -70,24 +74,6 @@ interface ModelConfigDialogProps {
 }
 
 type ValidationStatus = "idle" | "validating" | "success" | "error"
-
-// Map provider names to models.dev logo names
-const PROVIDER_LOGO_MAP: Record<string, string> = {
-    openai: "openai",
-    anthropic: "anthropic",
-    google: "google",
-    azure: "azure",
-    bedrock: "amazon-bedrock",
-    openrouter: "openrouter",
-    deepseek: "deepseek",
-    siliconflow: "siliconflow",
-    sglang: "openai", // SGLang is OpenAI-compatible
-    gateway: "vercel",
-    edgeone: "tencent-cloud",
-    vertexai: "google",
-    doubao: "bytedance",
-    modelscope: "modelscope",
-}
 
 // Provider logo component
 function ProviderLogo({
@@ -617,7 +603,7 @@ export function ModelConfigDialog({
                     </div>
 
                     {/* Provider Details (Right Panel) */}
-                    <div className="flex-1 min-w-0 flex flex-col overflow-auto [&::-webkit-scrollbar]:hidden ">
+                    <div className="flex-1 min-w-0 flex flex-col overflow-auto scrollbar-thin">
                         {selectedProvider ? (
                             <ScrollArea className="flex-1" ref={scrollRef}>
                                 <div className="p-6 space-y-8">
@@ -1345,6 +1331,16 @@ export function ModelConfigDialog({
                                                             }
                                                             className="h-9 rounded-xl font-mono text-xs"
                                                         />
+                                                        {selectedProvider.provider ===
+                                                            "minimax" && (
+                                                            <p className="text-xs text-muted-foreground">
+                                                                {
+                                                                    dict
+                                                                        .modelConfig
+                                                                        .minimaxBaseUrlHint
+                                                                }
+                                                            </p>
+                                                        )}
                                                     </div>
                                                 </>
                                             )}

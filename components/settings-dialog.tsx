@@ -2,7 +2,7 @@
 
 import { ChevronRight, Github, Info, Moon, Sun, Tag } from "lucide-react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
-import { Suspense, useEffect, useState } from "react"
+import { Suspense, useCallback, useEffect, useState } from "react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import {
@@ -22,6 +22,7 @@ import {
     SelectValue,
 } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
+import { Textarea } from "@/components/ui/textarea"
 import { useDictionary } from "@/hooks/use-dictionary"
 import { getApiEndpoint } from "@/lib/base-path"
 import { i18n, type Locale } from "@/lib/i18n/config"
@@ -73,6 +74,8 @@ interface SettingsDialogProps {
     onOpenModelConfig?: () => void
     drawioBaseUrl?: string
     onDrawioBaseUrlChange?: (url: string) => void
+    customSystemMessage?: string
+    onCustomSystemMessageChange?: (value: string) => void
 }
 
 export const STORAGE_ACCESS_CODE_KEY = "next-ai-draw-io-access-code"
@@ -99,6 +102,8 @@ function SettingsContent({
     onOpenModelConfig,
     drawioBaseUrl,
     onDrawioBaseUrlChange,
+    customSystemMessage = "",
+    onCustomSystemMessageChange = () => {},
 }: SettingsDialogProps) {
     const dict = useDictionary()
     const router = useRouter()
@@ -113,6 +118,20 @@ function SettingsContent({
     const [currentLang, setCurrentLang] = useState("en")
     const [sendShortcut, setSendShortcut] = useState("ctrl-enter")
     const [localDrawioUrl, setLocalDrawioUrl] = useState("")
+
+    // Panel visibility state
+    const [showRecentChats, setShowRecentChats] = useState(true)
+    const [showMyTemplates, setShowMyTemplates] = useState(true)
+    const [showQuickExamples, setShowQuickExamples] = useState(true)
+
+    const handlePanelToggle = useCallback(
+        (key: string, value: boolean, setter: (v: boolean) => void) => {
+            setter(value)
+            localStorage.setItem(key, String(value))
+            window.dispatchEvent(new CustomEvent("panelVisibilityChange"))
+        },
+        [],
+    )
 
     // Proxy settings state (Electron only)
     const [httpProxy, setHttpProxy] = useState("")
@@ -170,6 +189,17 @@ function SettingsContent({
                 drawioBaseUrl ||
                     localStorage.getItem(STORAGE_KEYS.drawioBaseUrl) ||
                     "",
+            )
+
+            setShowRecentChats(
+                localStorage.getItem(STORAGE_KEYS.showRecentChats) !== "false",
+            )
+            setShowMyTemplates(
+                localStorage.getItem(STORAGE_KEYS.showMyTemplates) !== "false",
+            )
+            setShowQuickExamples(
+                localStorage.getItem(STORAGE_KEYS.showQuickExamples) !==
+                    "false",
             )
 
             setError("")
@@ -287,7 +317,7 @@ function SettingsContent({
     }
 
     return (
-        <DialogContent className="sm:max-w-lg p-0 gap-0">
+        <DialogContent className="sm:max-w-lg p-0 gap-0 max-h-[90vh] flex flex-col overflow-hidden">
             {/* Header */}
             <DialogHeader className="px-6 pt-6 pb-4">
                 <DialogTitle>{dict.settings.title}</DialogTitle>
@@ -297,7 +327,7 @@ function SettingsContent({
             </DialogHeader>
 
             {/* Content */}
-            <div className="px-6 pb-6">
+            <div className="px-6 pb-6 overflow-y-auto flex-1 scrollbar-thin">
                 <div className="divide-y divide-border-subtle">
                     {/* API Keys & Models */}
                     {onOpenModelConfig && (
@@ -492,6 +522,63 @@ function SettingsContent({
                         </div>
                     </SettingItem>
 
+                    {/* Panel Visibility */}
+                    <SettingItem
+                        label={dict.settings.panelVisibility}
+                        description={dict.settings.panelVisibilityDescription}
+                    >
+                        <div className="flex flex-col gap-2">
+                            <label className="flex items-center gap-2 cursor-pointer">
+                                <Switch
+                                    id="show-recent-chats"
+                                    checked={showRecentChats}
+                                    onCheckedChange={(v) =>
+                                        handlePanelToggle(
+                                            STORAGE_KEYS.showRecentChats,
+                                            v,
+                                            setShowRecentChats,
+                                        )
+                                    }
+                                />
+                                <span className="text-xs text-muted-foreground">
+                                    {dict.settings.showRecentChats}
+                                </span>
+                            </label>
+                            <label className="flex items-center gap-2 cursor-pointer">
+                                <Switch
+                                    id="show-my-templates"
+                                    checked={showMyTemplates}
+                                    onCheckedChange={(v) =>
+                                        handlePanelToggle(
+                                            STORAGE_KEYS.showMyTemplates,
+                                            v,
+                                            setShowMyTemplates,
+                                        )
+                                    }
+                                />
+                                <span className="text-xs text-muted-foreground">
+                                    {dict.settings.showMyTemplates}
+                                </span>
+                            </label>
+                            <label className="flex items-center gap-2 cursor-pointer">
+                                <Switch
+                                    id="show-quick-examples"
+                                    checked={showQuickExamples}
+                                    onCheckedChange={(v) =>
+                                        handlePanelToggle(
+                                            STORAGE_KEYS.showQuickExamples,
+                                            v,
+                                            setShowQuickExamples,
+                                        )
+                                    }
+                                />
+                                <span className="text-xs text-muted-foreground">
+                                    {dict.settings.showQuickExamples}
+                                </span>
+                            </label>
+                        </div>
+                    </SettingItem>
+
                     {/* VLM Diagram Validation */}
                     <SettingItem
                         label={dict.settings.diagramValidation}
@@ -510,6 +597,33 @@ function SettingsContent({
                             </span>
                         </div>
                     </SettingItem>
+
+                    {/* Custom System Message */}
+                    <div className="py-4 space-y-3">
+                        <div className="space-y-0.5">
+                            <Label
+                                htmlFor="custom-system-message"
+                                className="text-sm font-medium"
+                            >
+                                {dict.settings.customSystemMessage}
+                            </Label>
+                            <p className="text-xs text-muted-foreground">
+                                {dict.settings.customSystemMessageDescription}
+                            </p>
+                        </div>
+                        <Textarea
+                            id="custom-system-message"
+                            value={customSystemMessage}
+                            onChange={(e) =>
+                                onCustomSystemMessageChange(e.target.value)
+                            }
+                            placeholder={
+                                dict.settings.customSystemMessagePlaceholder
+                            }
+                            className="min-h-[80px] max-h-[160px] text-sm"
+                            maxLength={5000}
+                        />
+                    </div>
 
                     {/* Send Shortcut */}
                     <SettingItem

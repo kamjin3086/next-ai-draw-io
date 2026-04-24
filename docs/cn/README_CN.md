@@ -19,7 +19,9 @@
 
 一个集成了AI功能的Next.js网页应用，与draw.io图表无缝结合。通过自然语言命令和AI辅助可视化来创建、修改和增强图表。
 
-> 注：感谢 <img src="https://raw.githubusercontent.com/DayuanJiang/next-ai-draw-io/main/public/doubao-color.png" alt="" height="20" /> [字节跳动豆包](https://www.volcengine.com/activity/newyear-referral?utm_campaign=doubao&utm_content=aidrawio&utm_medium=github&utm_source=coopensrc&utm_term=project) 的赞助支持，本项目的 Demo 现已接入强大的 K2-thinking 模型！
+> 注：感谢 <img src="https://raw.githubusercontent.com/DayuanJiang/next-ai-draw-io/main/public/doubao-color.png" alt="" height="20" /> [字节跳动豆包](https://www.volcengine.com/activity/codingplan?ac=MMAP8JTTCAQ2&rc=Z9Z3LDTJ&utm_campaign=drawio&utm_content=drawio&utm_medium=devrel&utm_source=OWO&utm_term=drawio) 的赞助支持，本项目的 Demo 现已接入强大的 glm-4.7 模型！
+
+<a href="https://www.volcengine.com/activity/codingplan?ac=MMAP8JTTCAQ2&rc=Z9Z3LDTJ&utm_campaign=drawio&utm_content=drawio&utm_medium=devrel&utm_source=OWO&utm_term=drawio" target="_blank"><img src="../../public/volcengine-invite.png" alt="火山引擎方舟 Coding Plan" width="300" /></a>
 
 https://github.com/user-attachments/assets/b2eef5f3-b335-4e71-a755-dc2e80931979
 
@@ -28,7 +30,7 @@ https://github.com/user-attachments/assets/b2eef5f3-b335-4e71-a755-dc2e80931979
   - [目录](#目录)
   - [示例](#示例)
   - [功能特性](#功能特性)
-  - [MCP服务器（预览）](#mcp服务器预览)
+  - [MCP服务器](#mcp服务器)
     - [Claude Code CLI](#claude-code-cli)
   - [快速开始](#快速开始)
     - [在线试用](#在线试用)
@@ -54,31 +56,31 @@ https://github.com/user-attachments/assets/b2eef5f3-b335-4e71-a755-dc2e80931979
   <tr>
     <td colspan="2" valign="top" align="center">
       <strong>动画Transformer连接器</strong><br />
-      <p><strong>提示词：</strong> 给我一个带有**动画连接器**的Transformer架构图。</p>
+      <p><strong>Prompt:</strong> Give me a **animated connector** diagram of transformer's architecture.</p>
       <img src="../../public/animated_connectors.svg" alt="带动画连接器的Transformer架构" width="480" />
     </td>
   </tr>
   <tr>
     <td width="50%" valign="top">
-      <strong>GCP架构图</strong><br />
-      <p><strong>提示词：</strong> 使用**GCP图标**生成一个GCP架构图。在这个图中，用户连接到托管在实例上的前端。</p>
-      <img src="../../public/gcp_demo.svg" alt="GCP架构图" width="480" />
+      <strong>RAG技术图</strong><br />
+      <p><strong>Prompt:</strong> Generate a RAG architecture diagram for **chat application**. Use connected diagram for data ingestion</p>
+      <img src="../../public/rag_prod.svg" alt="RAG架构图" width="480" />
     </td>
     <td width="50%" valign="top">
-      <strong>AWS架构图</strong><br />
-      <p><strong>提示词：</strong> 使用**AWS图标**生成一个AWS架构图。在这个图中，用户连接到托管在实例上的前端。</p>
-      <img src="../../public/aws_demo.svg" alt="AWS架构图" width="480" />
+      <strong>React和AWS认证流程</strong><br />
+      <p><strong>Prompt:</strong> Generate authentication process using React with **AWS**. Use Serverless architecture.</p>
+      <img src="../../public/auth.svg" alt="认证架构图" width="480" />
     </td>
   </tr>
   <tr>
     <td width="50%" valign="top">
-      <strong>Azure架构图</strong><br />
-      <p><strong>提示词：</strong> 使用**Azure图标**生成一个Azure架构图。在这个图中，用户连接到托管在实例上的前端。</p>
-      <img src="../../public/azure_demo.svg" alt="Azure架构图" width="480" />
+      <strong>开放式创新</strong><br />
+      <p><strong>Prompt:</strong> Create visualization of Henry Chesbrough's Open Innovation model.</p>
+      <img src="../../public/inno.svg" alt="开放式创新图" width="480" />
     </td>
     <td width="50%" valign="top">
       <strong>猫咪素描</strong><br />
-      <p><strong>提示词：</strong> 给我画一只可爱的猫。</p>
+      <p><strong>Prompt:</strong> Draw a cute cat for me.</p>
       <img src="../../public/cat_demo.svg" alt="猫咪绘图" width="240" />
     </td>
   </tr>
@@ -96,9 +98,7 @@ https://github.com/user-attachments/assets/b2eef5f3-b335-4e71-a755-dc2e80931979
 -   **云架构图支持**：专门支持生成云架构图（AWS、GCP、Azure）
 -   **动画连接器**：在图表元素之间创建动态动画连接器，实现更好的可视化效果
 
-## MCP服务器（预览）
-
-> **预览功能**：此功能为实验性功能，可能不稳定。
+## MCP服务器
 
 通过MCP（模型上下文协议）在Claude Desktop、Cursor和VS Code等AI代理中使用Next AI Draw.io。
 
@@ -195,7 +195,7 @@ npm run dev
 
 ## 多提供商支持
 
--   [字节跳动豆包](https://www.volcengine.com/activity/newyear-referral?utm_campaign=doubao&utm_content=aidrawio&utm_medium=github&utm_source=coopensrc&utm_term=project)
+-   [字节跳动豆包](https://www.volcengine.com/activity/codingplan?ac=MMAP8JTTCAQ2&rc=Z9Z3LDTJ&utm_campaign=drawio&utm_content=drawio&utm_medium=devrel&utm_source=OWO&utm_term=drawio)
 -   AWS Bedrock（默认）
 -   OpenAI
 -   Anthropic
@@ -236,7 +236,7 @@ npm run dev
 
 ## 支持与联系
 
-**特别感谢[字节跳动豆包](https://www.volcengine.com/activity/newyear-referral?utm_campaign=doubao&utm_content=aidrawio&utm_medium=github&utm_source=coopensrc&utm_term=project)赞助演示站点的 API Token 使用！** 注册火山引擎 ARK 平台即可获得50万免费Token！
+**特别感谢[字节跳动豆包](https://www.volcengine.com/activity/codingplan?ac=MMAP8JTTCAQ2&rc=Z9Z3LDTJ&utm_campaign=drawio&utm_content=drawio&utm_medium=devrel&utm_source=OWO&utm_term=drawio)赞助演示站点的 API Token 使用！** 注册火山引擎 ARK 平台即可获得50万免费Token！
 
 如果您觉得这个项目有用，请考虑[赞助](https://github.com/sponsors/DayuanJiang)来帮助我托管在线演示站点！
 
