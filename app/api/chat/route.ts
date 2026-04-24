@@ -39,7 +39,7 @@ import { findServerModelById } from "@/lib/server-model-config"
 import { getSystemPrompt } from "@/lib/system-prompts"
 import { getUserIdFromRequest } from "@/lib/user-id"
 
-export const maxDuration = 120
+export const maxDuration = 240
 
 // Helper function to create cached stream response
 function createCachedStreamResponse(xml: string): Response {

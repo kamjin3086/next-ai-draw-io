@@ -11,7 +11,7 @@ import {
     ValidationResultSchema,
 } from "@/lib/validation-schema"
 
-export const maxDuration = 30
+export const maxDuration = 60
 
 interface ValidateDiagramRequest {
     imageData: string // Base64 PNG data URL
