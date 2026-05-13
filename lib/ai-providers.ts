@@ -1360,12 +1360,24 @@ export function supportsImageInput(modelId: string): boolean {
 
     // Qwen text models (not vision variants like qwen-vl)
     // Qwen3.5 series (qwen3.5, qwen3.5-plus, qwen3.5-flash) natively support image input
+    // Qwen3.6 series (qwen3.6, qwen3.6-plus, qwen3.6-flash) natively support image input
     // QvQ (Qwen Visual QA) models are vision models — exclude them even when prefixed with "qwen/"
     if (
         lowerModelId.includes("qwen") &&
         !hasVisionIndicator &&
         !lowerModelId.includes("qwen3.5") &&
+        !lowerModelId.includes("qwen3.6") &&
         !lowerModelId.includes("qvq")
+    ) {
+        return false
+    }
+
+    // Gemma text models (not vision variants)
+    // Gemma4 series (gemma4, gemma4-plus, gemma4-flash) natively support image input
+    if (
+        lowerModelId.includes("gemma") &&
+        !hasVisionIndicator &&
+        !lowerModelId.includes("gemma4")
     ) {
         return false
     }
