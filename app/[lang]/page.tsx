@@ -1,8 +1,17 @@
 "use client"
 import { usePathname, useRouter } from "next/navigation"
 import { Suspense, useCallback, useEffect, useRef, useState } from "react"
+import type { UrlParameters } from "react-drawio"
 import { DrawIoEmbed } from "react-drawio"
 import type { ImperativePanelHandle } from "react-resizable-panels"
+
+// Extend react-drawio UrlParameters with additional draw.io embed params
+// (offline/stealth are valid draw.io params but not in the library's type definitions)
+interface DrawIoUrlParameters extends UrlParameters {
+    offline?: boolean
+    stealth?: boolean
+}
+
 import ChatPanel from "@/components/chat-panel"
 import {
     ResizableHandle,
@@ -11,8 +20,8 @@ import {
 } from "@/components/ui/resizable"
 import { useDiagram } from "@/contexts/diagram-context"
 import { i18n, type Locale } from "@/lib/i18n/config"
-import { STORAGE_KEYS } from "@/lib/storage"
 import { isIndexedDBUsable } from "@/lib/session-storage"
+import { STORAGE_KEYS } from "@/lib/storage"
 
 export default function Home() {
     const {
@@ -228,25 +237,25 @@ export default function Home() {
                                                 ? { confirmExit: false }
                                                 : undefined
                                         }
-                                        urlParameters={{
-                                            ui: drawioUi,
-                                            spin: false,
-                                            libraries: false,
-                                            // Disable modified tracking only when persistence is available
-                                            ...(canPersist && {
-                                                modified: false,
-                                                keepmodified: false,
-                                            }),
-                                            saveAndExit: false,
-                                            noSaveBtn: true,
-                                            noExitBtn: true,
-                                            dark: darkMode,
-                                            lang: currentLang,
-                                            // Enable offline mode in Electron to disable external service calls
-                                            ...(isElectron && {
+                                        urlParameters={
+                                            {
+                                                ui: drawioUi,
+                                                spin: false,
+                                                libraries: false,
+                                                // Disable modified tracking only when persistence is available
+                                                ...(canPersist && {
+                                                    modified: false,
+                                                    keepmodified: false,
+                                                }),
+                                                saveAndExit: false,
+                                                noSaveBtn: true,
+                                                noExitBtn: true,
+                                                dark: darkMode,
+                                                lang: currentLang,
                                                 offline: true,
-                                            }),
-                                        }}
+                                                stealth: true,
+                                            } as DrawIoUrlParameters
+                                        }
                                     />
                                 </div>
                             )}

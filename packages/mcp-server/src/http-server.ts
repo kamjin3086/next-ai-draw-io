@@ -627,7 +627,7 @@ function getHtmlPage(sessionId: string): string {
                 </button>
             </div>
         </div>
-        <iframe id="drawio" src="${normalizeUrl(DRAWIO_BASE_URL)}/?embed=1&proto=json&spin=1&libraries=1&noSaveBtn=1&noExitBtn=1&saveAndExit=0"></iframe>
+        <iframe id="drawio" src="${normalizeUrl(DRAWIO_BASE_URL)}/?embed=1&proto=json&spin=1&libraries=1&noSaveBtn=1&noExitBtn=1&saveAndExit=0&offline=1&stealth=1"></iframe>
     </div>
     <div id="history-modal">
         <div class="modal-content">
