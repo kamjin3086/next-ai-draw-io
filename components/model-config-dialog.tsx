@@ -3,25 +3,27 @@
 import {
     AlertCircle,
     Check,
+    CheckCircle2,
     ChevronRight,
-    Clock,
-    Cloud,
+    CircleDashed,
     Eye,
     EyeOff,
-    Key,
-    Link2,
     Loader2,
     Plus,
     RefreshCw,
-    Server,
-    Settings2,
-    Sparkles,
-    Tag,
     Trash2,
     X,
-    Zap,
 } from "lucide-react"
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useId, useRef, useState } from "react"
+import { useChatEngine } from "@/components/chat/chat-engine"
+import {
+    ProviderCredentialsFields,
+    type SecretField,
+} from "@/components/provider-credentials-fields"
+import { ProviderLogo } from "@/components/provider-logo"
+import { ProviderPicker } from "@/components/settings/provider-picker"
+import { ProvidersList } from "@/components/settings/providers-list"
+import { SettingsHeader } from "@/components/settings/settings-header"
 import {
     AlertDialog,
     AlertDialogAction,
@@ -34,12 +36,12 @@ import {
 } from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
 import {
-    Dialog,
-    DialogContent,
-    DialogDescription,
-    DialogHeader,
-    DialogTitle,
-} from "@/components/ui/dialog"
+    Command,
+    CommandEmpty,
+    CommandInput,
+    CommandItem,
+    CommandList,
+} from "@/components/ui/command"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
@@ -48,139 +50,148 @@ import {
     PopoverTrigger,
 } from "@/components/ui/popover"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import {
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-} from "@/components/ui/select"
-import { Switch } from "@/components/ui/switch"
 import { useDictionary } from "@/hooks/use-dictionary"
 import type { UseModelConfigReturn } from "@/hooks/use-model-config"
+import { getApiEndpoint } from "@/lib/base-path"
 import { formatMessage } from "@/lib/i18n/utils"
-import type { ProviderConfig, ProviderName } from "@/lib/types/model-config"
-import {
-    PROVIDER_INFO,
-    PROVIDER_LOGO_MAP,
-    SUGGESTED_MODELS,
+import type { ListedModel } from "@/lib/provider-models"
+import { hasCredentials } from "@/lib/provider-setup"
+import { STORAGE_KEYS } from "@/lib/storage"
+import type {
+    ModelConfig,
+    ProviderConfig,
+    ProviderName,
 } from "@/lib/types/model-config"
+import { PROVIDER_INFO, SUGGESTED_MODELS } from "@/lib/types/model-config"
 import { cn } from "@/lib/utils"
+import { useUiStore } from "@/stores/ui-store"
 
 interface ModelConfigDialogProps {
     open: boolean
-    onOpenChange: (open: boolean) => void
     modelConfig: UseModelConfigReturn
 }
 
 type ValidationStatus = "idle" | "validating" | "success" | "error"
 
-// Provider logo component
-function ProviderLogo({
-    provider,
-    className,
-}: {
-    provider: ProviderName
-    className?: string
-}) {
-    // Use Lucide icons for providers without models.dev logos
-    if (provider === "bedrock") {
-        return <Cloud className={cn("size-4", className)} />
-    }
-    if (provider === "sglang") {
-        return <Server className={cn("size-4", className)} />
-    }
-    if (provider === "doubao") {
-        return <Sparkles className={cn("size-4", className)} />
-    }
-
-    const logoName = PROVIDER_LOGO_MAP[provider] || provider
-    return (
-        // biome-ignore lint/performance/noImgElement: External URL from models.dev
-        <img
-            alt={`${provider} logo`}
-            className={cn("size-4 dark:invert", className)}
-            height={16}
-            src={`https://models.dev/logos/${logoName}.svg`}
-            width={16}
-        />
-    )
-}
-
-// Configuration section with title and optional action
-function ConfigSection({
+/** One numbered step of a provider's setup; a check mark once done */
+function Step({
+    n,
+    done,
     title,
-    icon: Icon,
     action,
     children,
 }: {
+    n: number
+    done: boolean
     title: string
-    icon: React.ComponentType<{ className?: string }>
     action?: React.ReactNode
     children: React.ReactNode
 }) {
     return (
-        <div className="space-y-4">
-            <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                    <Icon className="h-4 w-4 text-muted-foreground" />
-                    <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                        {title}
-                    </span>
+        <section className="flex gap-3.5">
+            <span
+                className={cn(
+                    "mt-px flex size-[22px] shrink-0 items-center justify-center rounded-full text-xs font-semibold",
+                    done
+                        ? "bg-success-muted text-success"
+                        : "bg-primary text-primary-foreground",
+                )}
+                data-testid={`step-${n}-${done ? "done" : "todo"}`}
+            >
+                {done ? <Check className="size-3" /> : n}
+            </span>
+            <div className="min-w-0 flex-1 space-y-3">
+                <div className="flex min-h-[22px] items-center justify-between gap-3">
+                    <h3 className="text-[13px] font-semibold">{title}</h3>
+                    {action}
                 </div>
-                {action}
+                {children}
             </div>
-            {children}
-        </div>
+        </section>
     )
 }
 
-// Card wrapper with subtle depth
-function ConfigCard({ children }: { children: React.ReactNode }) {
-    return (
-        <div className="rounded-2xl border border-border-subtle bg-surface-2/50 p-5 space-y-5">
-            {children}
-        </div>
-    )
+/**
+ * The latest test of each provider. Kept outside the component: this view
+ * mounts anew when settings reopen or another tab comes back, and a test
+ * started before must not overwrite a newer one's results.
+ */
+const latestTestRun = new Map<string, number>()
+
+/** Providers as last saved (the model config is saved on every change) */
+function savedProviders(): ProviderConfig[] {
+    try {
+        const stored = localStorage.getItem(STORAGE_KEYS.modelConfigs)
+        return stored
+            ? (JSON.parse(stored) as { providers: ProviderConfig[] }).providers
+            : []
+    } catch {
+        return []
+    }
 }
 
 export function ModelConfigDialog({
     open,
-    onOpenChange,
     modelConfig,
 }: ModelConfigDialogProps) {
     const dict = useDictionary()
-    const [selectedProviderId, setSelectedProviderId] = useState<string | null>(
-        null,
-    )
+    const t = dict.modelConfig
+    const engine = useChatEngine()
+    // Like the chat's model picker, "Use in the chat" waits while a request
+    // runs: the answer keeps the model it was sent with
+    const chatLocked = (engine.isBusy && !engine.error) || engine.isLeaving
+    // The page shown lives in the UI store: a chat error or the model
+    // picker can open settings on a provider or on the provider picker
+    const page = useUiStore((s) => s.modelsPage)
+    const setModelsPage = useUiStore((s) => s.setModelsPage)
+    const selectedProviderId = typeof page === "object" ? page.providerId : null
     const [showApiKey, setShowApiKey] = useState(false)
     const [validationStatus, setValidationStatus] =
         useState<ValidationStatus>("idle")
     const [validationError, setValidationError] = useState<string>("")
+    // Per provider, the credentials a test was refused with: the key field is
+    // marked until they change, here or in another tab, or a test passes. A
+    // model list says nothing about the key: some providers list models
+    // without one.
+    const [rejectedKeys, setRejectedKeys] = useState<Record<string, string>>({})
+    const markRejected = (
+        providerId: string,
+        askedWith: string,
+        rejected: boolean,
+    ) =>
+        setRejectedKeys(({ [providerId]: _, ...rest }) =>
+            rejected ? { ...rest, [providerId]: askedWith } : rest,
+        )
     const [customModelInput, setCustomModelInput] = useState("")
-    const scrollRef = useRef<HTMLDivElement>(null)
-    const validationResetTimeoutRef = useRef<ReturnType<
-        typeof setTimeout
-    > | null>(null)
     const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
     const [deleteConfirmText, setDeleteConfirmText] = useState("")
-    const [validatingModelIndex, setValidatingModelIndex] = useState<
-        number | null
-    >(null)
+    // Models whose test is running (they are all tested at once)
+    const [validatingModelIds, setValidatingModelIds] = useState<Set<string>>(
+        () => new Set(),
+    )
     const [duplicateError, setDuplicateError] = useState<string>("")
     const [editError, setEditError] = useState<{
         modelId: string
         message: string
     } | null>(null)
-
-    // Fetch-from-API state
-    const [fetchedModels, setFetchedModels] = useState<string[]>([])
-    const [isFetchingModels, setIsFetchingModels] = useState(false)
+    // Model ID being typed; written to the config only when valid on blur
+    const [modelIdDraft, setModelIdDraft] = useState<{
+        id: string
+        value: string
+    } | null>(null)
+    // Models fetched from the provider, per provider config, with the
+    // credentials they were fetched with
+    const [fetchedModels, setFetchedModels] = useState<
+        Record<string, { askedWith: string; models: ListedModel[] }>
+    >({})
+    // The providers whose model list is being fetched
+    const [fetchingFor, setFetchingFor] = useState<string[]>([])
     const [fetchModelsError, setFetchModelsError] = useState("")
-    const [showModelFetcher, setShowModelFetcher] = useState(false)
-    const [selectedFetchedModelIds, setSelectedFetchedModelIds] = useState<
-        Set<string>
-    >(new Set())
+    const [modelPickerOpen, setModelPickerOpen] = useState(false)
+    // models.dev data for hints, loaded with the dialog (it is ~180 KB)
+    const [getModelInfo, setGetModelInfo] = useState<
+        typeof import("@/lib/model-catalog").getModelInfo | null
+    >(null)
 
     const {
         config,
@@ -196,62 +207,272 @@ export function ModelConfigDialog({
     const selectedProvider = config.providers.find(
         (p) => p.id === selectedProviderId,
     )
-
-    // Cleanup validation reset timeout on unmount
+    // Another provider shown: what was shown for the one before goes, also
+    // when the page is changed from outside (openSettings)
+    const [shownProviderId, setShownProviderId] = useState(selectedProviderId)
+    if (shownProviderId !== selectedProviderId) {
+        setShownProviderId(selectedProviderId)
+        setValidationStatus("idle")
+        setValidationError("")
+        setShowApiKey(false)
+        setFetchModelsError("")
+        setModelPickerOpen(false)
+        setCustomModelInput("")
+        setDuplicateError("")
+        setEditError(null)
+        setModelIdDraft(null)
+    }
+    // For requests that finish after the user switched provider or edited
+    // a model id
+    const selectedProviderIdRef = useRef(selectedProviderId)
+    selectedProviderIdRef.current = selectedProviderId
+    const configRef = useRef(config)
+    configRef.current = config
+    // Set when this view goes away (settings closed or on another tab): its
+    // config no longer follows edits, the saved one does
+    const closedRef = useRef(false)
     useEffect(() => {
+        closedRef.current = false
         return () => {
-            if (validationResetTimeoutRef.current) {
-                clearTimeout(validationResetTimeoutRef.current)
-            }
+            closedRef.current = true
         }
     }, [])
+    // The providers as they are now: once this view is gone, as saved
+    const providersNow = () =>
+        closedRef.current ? savedProviders() : configRef.current.providers
+    // A model list or test result belongs to the credentials it was asked
+    // with; they can change meanwhile, here or in another tab
+    const credentialsOf = (providerId: string) => {
+        const p = providersNow().find((x) => x.id === providerId)
+        return JSON.stringify([
+            p?.provider,
+            p?.apiKey,
+            p?.baseUrl,
+            p?.awsAccessKeyId,
+            p?.awsSecretAccessKey,
+            p?.awsRegion,
+            p?.awsSessionToken,
+            p?.vertexApiKey,
+        ])
+    }
 
-    // Reset fetch-models state when switching providers
+    // The button that changed the page went with the old page: the new
+    // page's title takes the focus, unless one of its fields took it
+    // (autoFocus). Not on the first page: the dialog places the focus then.
+    const pageRef = useRef<HTMLDivElement>(null)
+    // The test result, read out by screen readers
+    const resultId = useId()
+    const useButtonRef = useRef<HTMLButtonElement>(null)
+    const backButtonRef = useRef<HTMLButtonElement>(null)
+    // A test passed: its button went with the success panel, whose first
+    // button takes the focus (it is described by the result) unless the
+    // focus went somewhere on the page meanwhile
     useEffect(() => {
-        setFetchedModels([])
-        setFetchModelsError("")
-        setSelectedFetchedModelIds(new Set())
-        setShowModelFetcher(false)
-    }, [selectedProviderId])
+        if (validationStatus !== "success") return
+        const root = pageRef.current
+        if (!root || root.contains(document.activeElement)) return
+        const use = useButtonRef.current
+        ;(use && !use.disabled ? use : backButtonRef.current)?.focus()
+    }, [validationStatus])
+    const pageKey =
+        selectedProvider?.id ?? (page === "picker" ? "picker" : "list")
+    const shownPageRef = useRef(pageKey)
+    useEffect(() => {
+        if (shownPageRef.current === pageKey) return
+        shownPageRef.current = pageKey
+        const root = pageRef.current
+        if (!root || root.contains(document.activeElement)) return
+        root.querySelector<HTMLElement>("[data-page-title]")?.focus()
+    }, [pageKey])
 
-    // Get suggested models for current provider
-    const suggestedModels = selectedProvider
-        ? SUGGESTED_MODELS[selectedProvider.provider] || []
+    // Discard an unfinished model ID edit when the dialog closes
+    useEffect(() => {
+        if (!open) setModelIdDraft(null)
+    }, [open])
+
+    useEffect(() => {
+        if (!open || getModelInfo) return
+        import("@/lib/model-catalog").then((catalog) =>
+            setGetModelInfo(() => catalog.getModelInfo),
+        )
+    }, [open, getModelInfo])
+
+    // What to do about an error kind, worded for this page, where the
+    // credentials can be fixed
+    const errorHints = (p: ProviderConfig): Record<string, string> => ({
+        ...(dict.errors.llm as Record<string, string>),
+        invalid_api_key:
+            p.provider === "bedrock" && !p.apiKey
+                ? t.awsKeysRejected
+                : t.keyRejected,
+        model_not_found: t.modelNotFound,
+    })
+
+    const handleFetchModels = async () => {
+        if (!selectedProvider) return
+        const providerId = selectedProvider.id
+        const askedWith = credentialsOf(providerId)
+        const hints = errorHints(selectedProvider)
+        setFetchingFor((current) => [...current, providerId])
+        setFetchModelsError("")
+        try {
+            const response = await fetch(
+                getApiEndpoint("/api/provider-models"),
+                {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        "x-access-code":
+                            localStorage.getItem(STORAGE_KEYS.accessCode) || "",
+                    },
+                    body: JSON.stringify({
+                        provider: selectedProvider.provider,
+                        apiKey: selectedProvider.apiKey,
+                        baseUrl: selectedProvider.baseUrl,
+                    }),
+                },
+            )
+            const data = await response.json().catch(() => ({}))
+            if (credentialsOf(providerId) !== askedWith) return
+            // The picker and the error belong to the provider shown
+            const stillShown = selectedProviderIdRef.current === providerId
+            if (Array.isArray(data.models)) {
+                setFetchedModels((current) => ({
+                    ...current,
+                    [providerId]: { askedWith, models: data.models },
+                }))
+                if (!stillShown) return
+                if (data.models.length > 0) setModelPickerOpen(true)
+                else setFetchModelsError(t.noModelsReturned)
+            } else {
+                if (!stillShown) return
+                setFetchModelsError(
+                    [hints[data.code], data.error].filter(Boolean).join(" ") ||
+                        formatMessage(t.requestFailed, {
+                            status: response.status,
+                        }),
+                )
+            }
+        } catch {
+            if (
+                selectedProviderIdRef.current === providerId &&
+                credentialsOf(providerId) === askedWith
+            ) {
+                setFetchModelsError(dict.errors.networkError)
+            }
+        } finally {
+            setFetchingFor((current) =>
+                current.filter((id) => id !== providerId),
+            )
+        }
+    }
+
+    // The provider's own list, if fetched with the credentials it has now,
+    // else the suggested models
+    const fetched = selectedProvider
+        ? fetchedModels[selectedProvider.id]
+        : undefined
+    const suggestedModels: ListedModel[] = selectedProvider
+        ? fetched && fetched.askedWith === credentialsOf(selectedProvider.id)
+            ? fetched.models
+            : (SUGGESTED_MODELS[selectedProvider.provider] || []).map((id) => ({
+                  id,
+              }))
         : []
+    // The picker closes when there is nothing left to pick from, so it does
+    // not open by itself once there is again
+    if (modelPickerOpen && suggestedModels.length === 0) {
+        setModelPickerOpen(false)
+    }
+    const keyRejected =
+        !!selectedProvider &&
+        rejectedKeys[selectedProvider.id] === credentialsOf(selectedProvider.id)
+    // Tool calls are what drawing needs: false when known to be missing
+    const supportsTools = (model: ListedModel) =>
+        selectedProvider
+            ? (model.tools ??
+              getModelInfo?.(selectedProvider.provider, model.id)?.tools)
+            : undefined
 
     // Filter out already-added models from suggestions
     const existingModelIds =
         selectedProvider?.models.map((m) => m.modelId) || []
     const availableSuggestions = suggestedModels.filter(
-        (modelId) => !existingModelIds.includes(modelId),
+        (model) => !existingModelIds.includes(model.id),
     )
+    // A few suggested models to add with one click
+    const quickSuggestions = selectedProvider
+        ? (SUGGESTED_MODELS[selectedProvider.provider] || [])
+              .filter((modelId) => !existingModelIds.includes(modelId))
+              .slice(0, 4)
+        : []
+
+    const openProvider = (providerId: string) => setModelsPage({ providerId })
 
     // Handle adding a new provider
     const handleAddProvider = (providerType: ProviderName) => {
         const newProvider = addProvider(providerType)
-        setSelectedProviderId(newProvider.id)
-        setValidationStatus("idle")
+        // With the first suggested model picked, a key is all a test needs
+        const firstModel = SUGGESTED_MODELS[providerType]?.[0]
+        if (firstModel) addModel(newProvider.id, firstModel)
+        openProvider(newProvider.id)
     }
 
     // Handle provider field updates
-    const handleProviderUpdate = (
-        field: keyof ProviderConfig,
-        value: string | boolean,
-    ) => {
-        if (!selectedProviderId) return
-        updateProvider(selectedProviderId, { [field]: value })
-        // Reset validation when credentials change
+    const handleProviderUpdate = (updates: Partial<ProviderConfig>) => {
+        if (!selectedProviderId || !selectedProvider) return
+        // Reset validation of the provider and its models when credentials change
         const credentialFields = [
             "apiKey",
             "baseUrl",
             "awsAccessKeyId",
             "awsSecretAccessKey",
             "awsRegion",
+            "awsSessionToken",
             "vertexApiKey",
         ]
-        if (credentialFields.includes(field)) {
+        if (Object.keys(updates).some((f) => credentialFields.includes(f))) {
             setValidationStatus("idle")
-            updateProvider(selectedProviderId, { validated: false })
+            // A test of this provider still running no longer counts
+            const ids = new Set(selectedProvider.models.map((m) => m.id))
+            setValidatingModelIds(
+                (prev) => new Set([...prev].filter((id) => !ids.has(id))),
+            )
+            setFetchModelsError("")
+            updates = {
+                ...updates,
+                validated: false,
+                models: selectedProvider.models.map((m) => ({
+                    ...m,
+                    validated: undefined,
+                    validationError: undefined,
+                    validationWarning: undefined,
+                    responseTime: undefined,
+                })),
+            }
+        }
+        updateProvider(selectedProviderId, updates)
+    }
+
+    // Empty the secrets of the Bedrock sign-in the user switched away from;
+    // a session token belongs to the access keys
+    const clearSecrets = (fields: SecretField[]) => {
+        if (!selectedProvider) return
+        const cleared = [
+            ...fields,
+            ...(fields.includes("awsAccessKeyId")
+                ? (["awsSessionToken"] as const)
+                : []),
+        ].filter((field) => selectedProvider[field])
+        // Nothing filled in: the test results still hold
+        if (cleared.length === 0) return
+        const updates = Object.fromEntries(cleared.map((field) => [field, ""]))
+        // Access keys kept behind an API key were never used (the server
+        // takes the API key first): the test results still hold
+        if (selectedProvider.apiKey && !fields.includes("apiKey")) {
+            updateProvider(selectedProvider.id, updates)
+        } else {
+            handleProviderUpdate(updates)
         }
     }
 
@@ -261,12 +482,17 @@ export function ModelConfigDialog({
         if (!selectedProviderId || !selectedProvider) return false
         // Prevent duplicate model IDs
         if (existingModelIds.includes(modelId)) {
-            setDuplicateError(`Model "${modelId}" already exists`)
+            setDuplicateError(t.modelIdExists)
             return false
         }
         setDuplicateError("")
         addModel(selectedProviderId, modelId)
         return true
+    }
+
+    const addCustomModel = () => {
+        const modelId = customModelInput.trim()
+        if (modelId && handleAddModel(modelId)) setCustomModelInput("")
     }
 
     // Handle deleting a model
@@ -279,107 +505,19 @@ export function ModelConfigDialog({
     const handleDeleteProvider = () => {
         if (!selectedProviderId) return
         deleteProvider(selectedProviderId)
-        setSelectedProviderId(null)
+        setModelsPage("list")
         setValidationStatus("idle")
         setDeleteConfirmOpen(false)
     }
 
-    // Fetch available models from the provider's /models endpoint
-    const handleFetchModels = useCallback(async () => {
-        if (!selectedProvider) return
-
-        const rawBaseUrl =
-            selectedProvider.baseUrl ||
-            PROVIDER_INFO[selectedProvider.provider].defaultBaseUrl
-        if (!rawBaseUrl) {
-            setFetchModelsError("No base URL configured")
-            return
-        }
-
-        const modelsUrl = `${rawBaseUrl.replace(/\/+$/, "")}/models`
-
-        setIsFetchingModels(true)
-        setFetchModelsError("")
-        setFetchedModels([])
-
-        try {
-            const headers: Record<string, string> = {}
-            if (selectedProvider.apiKey) {
-                headers["Authorization"] = `Bearer ${selectedProvider.apiKey}`
-            }
-
-            const response = await fetch(modelsUrl, { headers })
-            if (!response.ok) {
-                throw new Error(`HTTP ${response.status}`)
-            }
-
-            const data = await response.json()
-            // Standard OpenAI format: { data: [{ id: "model-name" }, ...] }
-            // Also handle flat arrays
-            const rawList: unknown[] = Array.isArray(data)
-                ? data
-                : (data.data ?? data.models ?? [])
-            const models = rawList
-                .map((m: unknown) => {
-                    if (typeof m === "string") return m
-                    if (typeof m === "object" && m !== null) {
-                        const obj = m as Record<string, unknown>
-                        return (
-                            (typeof obj.id === "string" ? obj.id : null) ??
-                            (typeof obj.name === "string" ? obj.name : null)
-                        )
-                    }
-                    return null
-                })
-                .filter(
-                    (id): id is string =>
-                        typeof id === "string" && id.length > 0,
-                )
-
-            // Deduplicate
-            const uniqueModels = [...new Set(models)]
-            setFetchedModels(uniqueModels)
-            setSelectedFetchedModelIds(new Set())
-        } catch (error) {
-            setFetchModelsError(
-                error instanceof Error
-                    ? error.message
-                    : "Failed to fetch models",
-            )
-        } finally {
-            setIsFetchingModels(false)
-        }
-    }, [selectedProvider])
-
     // Validate all models
     const handleValidate = useCallback(async () => {
         if (!selectedProvider || !selectedProviderId) return
-
-        // Check credentials based on provider type
-        const isBedrock = selectedProvider.provider === "bedrock"
-        const isEdgeOne = selectedProvider.provider === "edgeone"
-        const isOllama = selectedProvider.provider === "ollama"
-        const isVertexAI = selectedProvider.provider === "vertexai"
-        if (isBedrock) {
-            if (
-                !selectedProvider.awsAccessKeyId ||
-                !selectedProvider.awsSecretAccessKey ||
-                !selectedProvider.awsRegion
-            ) {
-                return
-            }
-        } else if (isVertexAI) {
-            // Vertex AI requires vertexApiKey for Express Mode
-            if (!selectedProvider.vertexApiKey) {
-                return
-            }
-        } else if (!isEdgeOne && !isOllama && !selectedProvider.apiKey) {
-            return
-        }
+        if (!hasCredentials(selectedProvider)) return
 
         // Need at least one model to validate
         if (selectedProvider.models.length === 0) {
-            setValidationError("Add at least one model to validate")
+            setValidationError(t.addModelFirst)
             setValidationStatus("error")
             return
         }
@@ -389,1682 +527,864 @@ export function ModelConfigDialog({
 
         let allValid = true
         let errorCount = 0
+        let idChanged = false
+        let rejected = false
+        const askedWith = credentialsOf(selectedProviderId)
+        const run = (latestTestRun.get(selectedProviderId) ?? 0) + 1
+        latestTestRun.set(selectedProviderId, run)
 
-        // Validate each model
-        for (let i = 0; i < selectedProvider.models.length; i++) {
-            const model = selectedProvider.models[i]
-            setValidatingModelIndex(i)
+        // For EdgeOne, construct baseUrl from current origin
+        const baseUrl =
+            selectedProvider.provider === "edgeone"
+                ? `${window.location.origin}/api/edgeai`
+                : selectedProvider.baseUrl
+        const hints = errorHints(selectedProvider)
 
-            try {
-                // For EdgeOne, construct baseUrl from current origin
-                const baseUrl = isEdgeOne
-                    ? `${window.location.origin}/api/edgeai`
-                    : selectedProvider.baseUrl
-
-                const response = await fetch("/api/validate-model", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        provider: selectedProvider.provider,
-                        apiKey: selectedProvider.apiKey,
-                        baseUrl,
-                        modelId: model.modelId,
-                        // AWS Bedrock credentials
-                        awsAccessKeyId: selectedProvider.awsAccessKeyId,
-                        awsSecretAccessKey: selectedProvider.awsSecretAccessKey,
-                        awsRegion: selectedProvider.awsRegion,
-                        // Vertex AI credentials (Express Mode)
-                        vertexApiKey: selectedProvider.vertexApiKey,
-                    }),
-                })
-                const data = await response.json()
-
-                if (data.valid) {
-                    updateModel(selectedProviderId, model.id, {
-                        validated: true,
-                        validationError: undefined,
+        // Test every model at once; each row updates when its answer arrives
+        setValidatingModelIds(
+            (prev) =>
+                new Set([...prev, ...selectedProvider.models.map((m) => m.id)]),
+        )
+        await Promise.all(
+            selectedProvider.models.map(async (model) => {
+                let update: Partial<ModelConfig>
+                let code: string | undefined
+                try {
+                    const response = await fetch(
+                        getApiEndpoint("/api/validate-model"),
+                        {
+                            method: "POST",
+                            headers: {
+                                "Content-Type": "application/json",
+                                "x-access-code":
+                                    localStorage.getItem(
+                                        STORAGE_KEYS.accessCode,
+                                    ) || "",
+                            },
+                            body: JSON.stringify({
+                                provider: selectedProvider.provider,
+                                apiKey: selectedProvider.apiKey,
+                                baseUrl,
+                                modelId: model.modelId,
+                                // AWS Bedrock credentials
+                                awsAccessKeyId: selectedProvider.awsAccessKeyId,
+                                awsSecretAccessKey:
+                                    selectedProvider.awsSecretAccessKey,
+                                awsRegion: selectedProvider.awsRegion,
+                                // Temporary AWS credentials, as the chat sends
+                                awsSessionToken:
+                                    selectedProvider.awsSessionToken,
+                                // Vertex AI credentials (Express Mode)
+                                vertexApiKey: selectedProvider.vertexApiKey,
+                            }),
+                        },
+                    )
+                    const data = await response.json().catch(() => ({}))
+                    code = data.valid ? undefined : data.code
+                    update = data.valid
+                        ? {
+                              validated: true,
+                              validationError: undefined,
+                              validationWarning: data.warning,
+                              responseTime: data.responseTime,
+                          }
+                        : {
+                              validated: false,
+                              // The hint for the error's kind, then the
+                              // provider's own message
+                              validationError:
+                                  [hints[data.code], data.error]
+                                      .filter(Boolean)
+                                      .join(" ") ||
+                                  (response.ok
+                                      ? t.validationError
+                                      : formatMessage(t.requestFailed, {
+                                            status: response.status,
+                                        })),
+                              validationWarning: undefined,
+                          }
+                } catch {
+                    update = {
+                        validated: false,
+                        validationError: dict.errors.networkError,
+                        validationWarning: undefined,
+                    }
+                }
+                // A newer test started: its own results and spinners count,
+                // whatever the credentials are now (they may have come back)
+                if (run !== latestTestRun.get(selectedProviderId)) return
+                // Credentials changed during the test: drop the result. A
+                // change in another tab left the spinner on, so clear it
+                // (model ids are unique, whatever provider is shown).
+                if (credentialsOf(selectedProviderId) !== askedWith) {
+                    setValidatingModelIds((prev) => {
+                        const next = new Set(prev)
+                        next.delete(model.id)
+                        return next
                     })
-                } else {
+                    return
+                }
+                // So did this model's id: the result is for the old one
+                const current = providersNow()
+                    .find((p) => p.id === selectedProviderId)
+                    ?.models.find((m) => m.id === model.id)
+                if (current?.modelId !== model.modelId) {
+                    idChanged = true
+                    setValidatingModelIds((prev) => {
+                        const next = new Set(prev)
+                        next.delete(model.id)
+                        return next
+                    })
+                    return
+                }
+                if (update.validated === false) {
                     allValid = false
                     errorCount++
-                    updateModel(selectedProviderId, model.id, {
-                        validated: false,
-                        validationError: data.error || "Validation failed",
-                    })
+                    if (code === "invalid_api_key") rejected = true
                 }
-            } catch {
-                allValid = false
-                errorCount++
-                updateModel(selectedProviderId, model.id, {
-                    validated: false,
-                    validationError: "Network error",
+                updateModel(selectedProviderId, model.id, update)
+                setValidatingModelIds((prev) => {
+                    const next = new Set(prev)
+                    next.delete(model.id)
+                    return next
                 })
+            }),
+        )
+        if (run !== latestTestRun.get(selectedProviderId)) return
+        if (credentialsOf(selectedProviderId) !== askedWith) {
+            // The status line is about the provider shown now
+            if (selectedProviderIdRef.current === selectedProviderId) {
+                setValidationStatus("idle")
             }
+            return
         }
 
-        setValidatingModelIndex(null)
-
-        if (allValid) {
-            setValidationStatus("success")
+        // A model whose id changed was not tested
+        if (allValid && !idChanged) {
             updateProvider(selectedProviderId, { validated: true })
-            // Reset to idle after showing success briefly (with cleanup)
-            if (validationResetTimeoutRef.current) {
-                clearTimeout(validationResetTimeoutRef.current)
-            }
-            validationResetTimeoutRef.current = setTimeout(() => {
-                setValidationStatus("idle")
-                validationResetTimeoutRef.current = null
-            }, 1500)
+        }
+        markRejected(selectedProviderId, askedWith, rejected)
+        // The status line is about the provider shown now
+        if (selectedProviderIdRef.current !== selectedProviderId) return
+        if (idChanged) {
+            setValidationStatus("idle")
+        } else if (allValid) {
+            setValidationStatus("success")
         } else {
             setValidationStatus("error")
-            setValidationError(`${errorCount} model(s) failed validation`)
+            setValidationError(
+                formatMessage(
+                    errorCount === 1
+                        ? t.validationFailedCountOne
+                        : t.validationFailedCountOther,
+                    { count: errorCount },
+                ),
+            )
         }
-    }, [selectedProvider, selectedProviderId, updateProvider, updateModel])
+    }, [
+        selectedProvider,
+        selectedProviderId,
+        updateProvider,
+        updateModel,
+        dict,
+    ])
 
-    // Get all available provider types
-    const availableProviders = Object.keys(PROVIDER_INFO) as ProviderName[]
+    // Plaintext secret input with show/hide toggle (the user dialog stores
+    // keys client-side, so values are shown directly — unlike the masked
+    // admin panel)
+    const renderProviderSecret = (
+        field: SecretField | "awsSessionToken",
+        id: string,
+    ) => {
+        if (!selectedProvider) return null
+        const value = (selectedProvider[field] as string | undefined) ?? ""
+        return (
+            <div className="relative flex-1">
+                <Input
+                    id={id}
+                    // A provider still without credentials: they come first
+                    // (one of these three is shown at a time)
+                    autoFocus={
+                        !hasCredentials(selectedProvider) &&
+                        (field === "apiKey" ||
+                            field === "vertexApiKey" ||
+                            field === "awsAccessKeyId")
+                    }
+                    type={showApiKey ? "text" : "password"}
+                    value={value}
+                    onChange={(e) =>
+                        handleProviderUpdate({ [field]: e.target.value })
+                    }
+                    placeholder={
+                        field === "awsSecretAccessKey"
+                            ? t.enterSecretKey
+                            : field === "awsAccessKeyId"
+                              ? "AKIA..."
+                              : field === "awsSessionToken"
+                                ? undefined
+                                : t.enterApiKey
+                    }
+                    aria-invalid={keyRejected || undefined}
+                    className={cn(
+                        "h-9 pr-10 font-mono text-xs",
+                        keyRejected &&
+                            "border-destructive/60 focus-visible:ring-destructive/30",
+                    )}
+                />
+                <button
+                    type="button"
+                    onClick={() => setShowApiKey(!showApiKey)}
+                    aria-label={showApiKey ? t.hideValue : t.showValue}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded"
+                >
+                    {showApiKey ? (
+                        <EyeOff className="h-4 w-4" />
+                    ) : (
+                        <Eye className="h-4 w-4" />
+                    )}
+                </button>
+            </div>
+        )
+    }
 
-    // Get display name for provider
-    const getProviderDisplayName = (provider: ProviderConfig) => {
-        return provider.name || PROVIDER_INFO[provider.provider].label
+    const providerName = (p: ProviderConfig) =>
+        p.name || PROVIDER_INFO[p.provider].label
+
+    const renderModelRow = (model: ModelConfig) => {
+        if (!selectedProvider) return null
+        const testing = validatingModelIds.has(model.id)
+        const seconds = model.responseTime
+            ? (model.responseTime / 1000).toFixed(1)
+            : undefined
+        return (
+            <div
+                key={model.id}
+                className={cn(
+                    "transition-colors duration-150",
+                    model.validated === false && !testing
+                        ? "bg-destructive/5"
+                        : "hover:bg-interactive-hover/50",
+                )}
+            >
+                <div className="flex items-center gap-2.5 px-3 py-1.5 min-w-0">
+                    <span className="flex size-5 shrink-0 items-center justify-center">
+                        {testing ? (
+                            <Loader2 className="size-4 animate-spin text-muted-foreground" />
+                        ) : model.validated === true ? (
+                            <CheckCircle2 className="size-4 text-success" />
+                        ) : model.validated === false ? (
+                            <AlertCircle className="size-4 text-destructive" />
+                        ) : (
+                            <CircleDashed className="size-4 text-muted-foreground" />
+                        )}
+                    </span>
+                    <Input
+                        value={
+                            modelIdDraft?.id === model.id
+                                ? modelIdDraft.value
+                                : model.modelId
+                        }
+                        title={model.modelId}
+                        aria-label={t.modelId}
+                        onChange={(e) => {
+                            // Allow free typing - validation happens on blur
+                            // Clear edit error when typing
+                            if (editError?.modelId === model.id) {
+                                setEditError(null)
+                            }
+                            setModelIdDraft({
+                                id: model.id,
+                                value: e.target.value,
+                            })
+                        }}
+                        onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                                e.currentTarget.blur()
+                            }
+                        }}
+                        onBlur={(e) => {
+                            const newModelId = e.target.value.trim()
+                            // Drop the draft; an invalid ID falls back to the saved one
+                            setModelIdDraft(null)
+
+                            // Helper to show error with shake
+                            const showError = (message: string) => {
+                                setEditError({ modelId: model.id, message })
+                                e.target.animate(
+                                    [
+                                        { transform: "translateX(0)" },
+                                        { transform: "translateX(-4px)" },
+                                        { transform: "translateX(4px)" },
+                                        { transform: "translateX(-4px)" },
+                                        { transform: "translateX(4px)" },
+                                        { transform: "translateX(0)" },
+                                    ],
+                                    { duration: 400, easing: "ease-in-out" },
+                                )
+                                e.target.focus()
+                            }
+
+                            // Check for empty model name
+                            if (!newModelId) {
+                                showError(t.modelIdEmpty)
+                                return
+                            }
+
+                            // Check for duplicate
+                            const otherModelIds =
+                                selectedProvider?.models
+                                    .filter((m) => m.id !== model.id)
+                                    .map((m) => m.modelId) || []
+                            if (otherModelIds.includes(newModelId)) {
+                                showError(t.modelIdExists)
+                                return
+                            }
+
+                            // Clear error on valid blur
+                            setEditError(null)
+                            if (
+                                selectedProviderId &&
+                                newModelId !== model.modelId
+                            ) {
+                                updateModel(selectedProviderId, model.id, {
+                                    modelId: newModelId,
+                                    validated: undefined,
+                                    validationError: undefined,
+                                    validationWarning: undefined,
+                                    responseTime: undefined,
+                                })
+                            }
+                        }}
+                        className="h-8 min-w-0 flex-1 border-0 bg-transparent px-1.5 font-mono text-sm shadow-none focus-visible:bg-background focus-visible:ring-1 dark:bg-transparent"
+                    />
+                    {!testing && (
+                        <span
+                            className={cn(
+                                "shrink-0 text-xs",
+                                model.validated === true
+                                    ? "text-success"
+                                    : model.validated === false
+                                      ? "text-destructive"
+                                      : "text-muted-foreground",
+                            )}
+                        >
+                            {model.validated === true
+                                ? seconds
+                                    ? formatMessage(t.modelWorksTime, {
+                                          seconds,
+                                      })
+                                    : t.modelWorks
+                                : model.validated === false
+                                  ? t.modelFailed
+                                  : t.modelUntested}
+                        </span>
+                    )}
+                    <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 shrink-0 text-muted-foreground hover:text-destructive"
+                        onClick={() => handleDeleteModel(model.id)}
+                        aria-label={`${dict.common.delete} ${model.modelId}`}
+                    >
+                        <X className="h-4 w-4" />
+                    </Button>
+                </div>
+                {/* Show validation error inline */}
+                {model.validated === false && model.validationError && (
+                    <p className="px-3 pb-2 pl-11 text-xs text-destructive">
+                        {model.validationError}
+                    </p>
+                )}
+                {!model.validationWarning &&
+                    getModelInfo?.(selectedProvider.provider, model.modelId)
+                        ?.tools === false && (
+                        <p className="px-3 pb-2 pl-11 text-xs text-amber-600 dark:text-amber-400">
+                            {t.mayNotDraw}
+                        </p>
+                    )}
+                {model.validated && model.validationWarning && (
+                    <p className="px-3 pb-2 pl-11 text-xs text-amber-600 dark:text-amber-400">
+                        {model.validationWarning}
+                    </p>
+                )}
+                {/* Show edit error inline */}
+                {editError?.modelId === model.id && (
+                    <p className="px-3 pb-2 pl-11 text-xs text-destructive">
+                        {editError.message}
+                    </p>
+                )}
+            </div>
+        )
+    }
+
+    const renderProviderPage = (provider: ProviderConfig) => {
+        const models = provider.models
+        const credentialsDone = hasCredentials(provider)
+        const allWork =
+            models.length > 0 && models.every((m) => m.validated === true)
+        const firstWorking = models.find((m) => m.validated === true)
+        const lastSeconds =
+            models.length === 1 && models[0].responseTime
+                ? (models[0].responseTime / 1000).toFixed(1)
+                : undefined
+        const canTest = credentialsDone && models.length > 0
+        const testing = validationStatus === "validating"
+        const testBlocker = !credentialsDone
+            ? provider.provider === "bedrock"
+                ? t.needAws
+                : provider.provider === "azure"
+                  ? t.needAzure
+                  : t.needKey
+            : models.length === 0
+              ? t.needModel
+              : ""
+        const fetchLabel = formatMessage(t.fetchAllModels, {
+            name: providerName(provider),
+        })
+        const testPassed = validationStatus === "success" && allWork
+        // Until the failed models change, here or in another tab
+        const testFailed =
+            validationStatus === "error" &&
+            !!validationError &&
+            models.some((m) => m.validated === false)
+        const passedText =
+            models.length === 1
+                ? formatMessage(t.testPassedOne, { model: models[0].modelId })
+                : formatMessage(t.testPassedAll, { count: models.length })
+        const testLabel =
+            models.length === 0
+                ? t.stepTest
+                : models.length === 1
+                  ? formatMessage(t.testOne, { model: models[0].modelId })
+                  : formatMessage(t.testAll, { count: models.length })
+
+        return (
+            <div className="flex min-h-0 flex-1 flex-col">
+                <SettingsHeader>
+                    <button
+                        type="button"
+                        onClick={() => setModelsPage("list")}
+                        className="rounded text-muted-foreground hover:text-foreground"
+                    >
+                        {t.models}
+                    </button>
+                    <ChevronRight className="size-3.5 text-muted-foreground/60" />
+                    <span className="ml-0.5 flex size-6 items-center justify-center rounded-md bg-surface-2">
+                        <ProviderLogo
+                            provider={provider.provider}
+                            className="size-3.5"
+                        />
+                    </span>
+                    <h2
+                        className="truncate font-semibold outline-none"
+                        tabIndex={-1}
+                        data-page-title
+                    >
+                        {providerName(provider)}
+                    </h2>
+                </SettingsHeader>
+                <ScrollArea className="min-h-0 flex-1">
+                    <div className="space-y-7 px-6 pt-1 pb-6">
+                        {/* 1: credentials */}
+                        <Step
+                            n={1}
+                            done={credentialsDone && !keyRejected}
+                            title={t.stepConnect}
+                        >
+                            {provider.provider === "edgeone" ? (
+                                <p className="text-xs text-muted-foreground">
+                                    {t.edgeoneNoKey}
+                                </p>
+                            ) : (
+                                <ProviderCredentialsFields
+                                    // Its folded options and Bedrock choice
+                                    // belong to this provider
+                                    key={provider.id}
+                                    provider={provider.provider}
+                                    name={provider.name}
+                                    baseUrl={provider.baseUrl}
+                                    awsRegion={provider.awsRegion}
+                                    bedrockApiKey
+                                    settingsLayout
+                                    bedrockFilled={{
+                                        apiKey: !!provider.apiKey,
+                                        accessKey:
+                                            !!provider.awsAccessKeyId ||
+                                            !!provider.awsSecretAccessKey,
+                                    }}
+                                    clearSecrets={clearSecrets}
+                                    sessionTokenInput={renderProviderSecret(
+                                        "awsSessionToken",
+                                        "aws-session-token",
+                                    )}
+                                    onChange={(field, value) =>
+                                        handleProviderUpdate({
+                                            [field]: value,
+                                        })
+                                    }
+                                    renderSecret={({ field, id }) =>
+                                        renderProviderSecret(field, id)
+                                    }
+                                />
+                            )}
+                        </Step>
+
+                        {/* 2: models */}
+                        <Step
+                            n={2}
+                            done={models.length > 0}
+                            title={t.stepModels}
+                            action={
+                                PROVIDER_INFO[provider.provider].modelList && (
+                                    <button
+                                        type="button"
+                                        onClick={handleFetchModels}
+                                        disabled={fetchingFor.includes(
+                                            provider.id,
+                                        )}
+                                        title={fetchLabel}
+                                        className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground hover:text-foreground disabled:opacity-60"
+                                    >
+                                        {fetchingFor.includes(provider.id) ? (
+                                            <Loader2 className="size-3 shrink-0 animate-spin" />
+                                        ) : (
+                                            <RefreshCw className="size-3 shrink-0" />
+                                        )}
+                                        <span className="truncate">
+                                            {fetchLabel}
+                                        </span>
+                                    </button>
+                                )
+                            }
+                        >
+                            {fetchModelsError && (
+                                <p className="text-xs text-destructive">
+                                    {fetchModelsError}
+                                </p>
+                            )}
+                            {models.length > 0 && (
+                                <div className="overflow-hidden rounded-xl border border-border divide-y divide-border-subtle">
+                                    {models.map(renderModelRow)}
+                                </div>
+                            )}
+                            {quickSuggestions.length > 0 && (
+                                <div className="flex flex-wrap items-center gap-2">
+                                    <span className="text-xs text-muted-foreground">
+                                        {t.suggestedLabel}
+                                    </span>
+                                    {quickSuggestions.map((modelId) => (
+                                        <Button
+                                            key={modelId}
+                                            type="button"
+                                            variant="outline"
+                                            size="sm"
+                                            className="h-7 max-w-[260px] rounded-lg px-2 font-mono text-[11px]"
+                                            title={modelId}
+                                            onClick={() =>
+                                                handleAddModel(modelId)
+                                            }
+                                        >
+                                            <Plus className="h-3 w-3 shrink-0" />
+                                            <span className="truncate">
+                                                {modelId}
+                                            </span>
+                                        </Button>
+                                    ))}
+                                </div>
+                            )}
+                            <div className="flex items-start gap-2">
+                                <div className="min-w-0 flex-1">
+                                    <Input
+                                        placeholder={t.orTypeModelId}
+                                        aria-label={t.customModelId}
+                                        value={customModelInput}
+                                        onChange={(e) => {
+                                            setCustomModelInput(e.target.value)
+                                            if (duplicateError) {
+                                                setDuplicateError("")
+                                            }
+                                        }}
+                                        onKeyDown={(e) => {
+                                            // Enter that confirms an IME
+                                            // candidate adds nothing
+                                            if (
+                                                e.nativeEvent.isComposing ||
+                                                e.keyCode === 229
+                                            ) {
+                                                return
+                                            }
+                                            if (e.key === "Enter") {
+                                                addCustomModel()
+                                            }
+                                        }}
+                                        className={cn(
+                                            "h-8 rounded-lg font-mono text-xs",
+                                            duplicateError &&
+                                                "border-destructive focus-visible:ring-destructive",
+                                        )}
+                                    />
+                                    {duplicateError && (
+                                        <p className="mt-1 text-[11px] text-destructive">
+                                            {duplicateError}
+                                        </p>
+                                    )}
+                                </div>
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="h-8 rounded-lg"
+                                    onClick={addCustomModel}
+                                    disabled={!customModelInput.trim()}
+                                >
+                                    {t.add}
+                                </Button>
+                                {/* Nothing to browse for a provider without
+                                    suggested models, until its list is fetched.
+                                    modal: the dialog blocks the wheel outside
+                                    itself, and the list is rendered outside it */}
+                                {suggestedModels.length > 0 && (
+                                    <Popover
+                                        modal
+                                        open={modelPickerOpen}
+                                        onOpenChange={setModelPickerOpen}
+                                    >
+                                        <PopoverTrigger asChild>
+                                            <Button
+                                                variant="outline"
+                                                size="sm"
+                                                className="h-8 rounded-lg text-xs"
+                                                disabled={
+                                                    availableSuggestions.length ===
+                                                    0
+                                                }
+                                            >
+                                                {availableSuggestions.length ===
+                                                0
+                                                    ? t.allAdded
+                                                    : t.browseModels}
+                                            </Button>
+                                        </PopoverTrigger>
+                                        <PopoverContent
+                                            className="w-80 p-0"
+                                            align="end"
+                                        >
+                                            <Command>
+                                                <CommandInput
+                                                    placeholder={t.searchModels}
+                                                />
+                                                <CommandList className="max-h-72">
+                                                    <CommandEmpty>
+                                                        {t.noModelsFound}
+                                                    </CommandEmpty>
+                                                    {availableSuggestions.map(
+                                                        (model) => (
+                                                            <CommandItem
+                                                                key={model.id}
+                                                                value={model.id}
+                                                                onSelect={() => {
+                                                                    handleAddModel(
+                                                                        model.id,
+                                                                    )
+                                                                    setModelPickerOpen(
+                                                                        false,
+                                                                    )
+                                                                }}
+                                                                className="font-mono text-xs"
+                                                            >
+                                                                <span className="truncate">
+                                                                    {model.id}
+                                                                </span>
+                                                                {supportsTools(
+                                                                    model,
+                                                                ) === false && (
+                                                                    <span className="ml-auto shrink-0 font-sans text-[10px] text-amber-600 dark:text-amber-400">
+                                                                        {
+                                                                            t.noTools
+                                                                        }
+                                                                    </span>
+                                                                )}
+                                                            </CommandItem>
+                                                        ),
+                                                    )}
+                                                </CommandList>
+                                            </Command>
+                                        </PopoverContent>
+                                    </Popover>
+                                )}
+                            </div>
+                        </Step>
+
+                        {/* 3: test */}
+                        <Step n={3} done={allWork} title={t.stepTest}>
+                            {/* Always on the page, so a screen reader reads
+                                out the result when it arrives */}
+                            <p
+                                id={resultId}
+                                role="status"
+                                className="sr-only"
+                                data-testid="test-result"
+                            >
+                                {testPassed
+                                    ? passedText
+                                    : testFailed
+                                      ? validationError
+                                      : ""}
+                            </p>
+                            {testPassed ? (
+                                <div className="space-y-3 rounded-xl border border-success/20 bg-success-muted/70 px-4 py-3.5">
+                                    <p className="flex items-start gap-2 text-[13px] font-medium text-success">
+                                        <CheckCircle2 className="mt-0.5 size-4 shrink-0" />
+                                        {/* A long model id wraps */}
+                                        <span className="min-w-0 [overflow-wrap:anywhere]">
+                                            {passedText}
+                                            {lastSeconds && (
+                                                <span className="ml-2 text-xs font-normal opacity-80">
+                                                    {formatMessage(
+                                                        t.answeredIn,
+                                                        {
+                                                            seconds:
+                                                                lastSeconds,
+                                                        },
+                                                    )}
+                                                </span>
+                                            )}
+                                        </span>
+                                    </p>
+                                    <div className="flex flex-wrap gap-2">
+                                        {firstWorking && (
+                                            <Button
+                                                ref={useButtonRef}
+                                                className="h-9 max-w-full rounded-lg px-4"
+                                                disabled={chatLocked}
+                                                aria-describedby={resultId}
+                                                title={formatMessage(
+                                                    t.useInChat,
+                                                    {
+                                                        model: firstWorking.modelId,
+                                                    },
+                                                )}
+                                                onClick={() => {
+                                                    modelConfig.setSelectedModelId(
+                                                        firstWorking.id,
+                                                    )
+                                                    useUiStore
+                                                        .getState()
+                                                        .setSettingsOpen(false)
+                                                }}
+                                            >
+                                                <span className="truncate">
+                                                    {formatMessage(
+                                                        t.useInChat,
+                                                        {
+                                                            model: firstWorking.modelId,
+                                                        },
+                                                    )}
+                                                </span>
+                                            </Button>
+                                        )}
+                                        <Button
+                                            ref={backButtonRef}
+                                            variant="outline"
+                                            className="h-9 rounded-lg bg-background px-4"
+                                            aria-describedby={resultId}
+                                            onClick={() =>
+                                                setModelsPage("list")
+                                            }
+                                        >
+                                            {t.backToProviders}
+                                        </Button>
+                                    </div>
+                                </div>
+                            ) : (
+                                <>
+                                    <p className="text-xs text-muted-foreground">
+                                        {t.testHint}
+                                    </p>
+                                    <div className="flex flex-wrap items-center gap-3">
+                                        <Button
+                                            // Not disabled while it runs: the
+                                            // focus would leave it
+                                            onClick={() => {
+                                                if (!testing) handleValidate()
+                                            }}
+                                            disabled={!canTest}
+                                            aria-disabled={testing || undefined}
+                                            className="h-9 max-w-full rounded-lg px-4"
+                                            title={testLabel}
+                                            data-testid="test-models"
+                                        >
+                                            {validationStatus ===
+                                                "validating" && (
+                                                <Loader2 className="size-4 animate-spin" />
+                                            )}
+                                            <span className="truncate">
+                                                {testLabel}
+                                            </span>
+                                        </Button>
+                                        {testFailed && (
+                                            <p className="flex items-center gap-1 text-xs text-destructive">
+                                                <X className="size-3" />
+                                                {validationError}
+                                            </p>
+                                        )}
+                                    </div>
+                                    {testBlocker && (
+                                        <p className="text-xs text-muted-foreground">
+                                            {testBlocker}
+                                        </p>
+                                    )}
+                                </>
+                            )}
+                        </Step>
+
+                        <button
+                            type="button"
+                            onClick={() => setDeleteConfirmOpen(true)}
+                            className="flex items-center gap-1.5 text-xs text-destructive hover:underline"
+                        >
+                            <Trash2 className="size-3.5" />
+                            {formatMessage(
+                                models.length === 0
+                                    ? t.deleteProviderOnly
+                                    : models.length === 1
+                                      ? t.deleteProviderNamedOne
+                                      : t.deleteProviderNamedOther,
+                                {
+                                    name: providerName(provider),
+                                    count: models.length,
+                                },
+                            )}
+                        </button>
+                    </div>
+                </ScrollArea>
+            </div>
+        )
     }
 
     return (
-        <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent className="sm:max-w-4xl h-[80vh] max-h-[800px] overflow-hidden flex flex-col gap-0 p-0">
-                {/* Header */}
-                <DialogHeader className="px-6 pt-6 pb-4 shrink-0">
-                    <DialogTitle className="flex items-center gap-3">
-                        <div className="p-2 rounded-xl bg-surface-2">
-                            <Server className="h-5 w-5 text-primary" />
-                        </div>
-                        {dict.modelConfig?.title || "AI Model Configuration"}
-                    </DialogTitle>
-                    <DialogDescription className="mt-1">
-                        {dict.modelConfig?.description ||
-                            "Configure multiple AI providers and models for your workspace"}
-                    </DialogDescription>
-                </DialogHeader>
-
-                <div className="flex flex-1 min-h-0 overflow-hidden border-t border-border-subtle">
-                    {/* Provider List (Left Sidebar) */}
-                    <div className="w-60 shrink-0 flex flex-col bg-surface-1/50 border-r border-border-subtle">
-                        <div className="px-4 py-3">
-                            <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                                {dict.modelConfig.providers}
-                            </span>
-                        </div>
-
-                        <ScrollArea className="flex-1 px-2 min-h-0">
-                            <div className="space-y-1 pb-2">
-                                {config.providers.length === 0 ? (
-                                    <div className="px-3 py-8 text-center">
-                                        <div className="inline-flex items-center justify-center w-10 h-10 rounded-full bg-surface-2 mb-3">
-                                            <Plus className="h-5 w-5 text-muted-foreground" />
-                                        </div>
-                                        <p className="text-xs text-muted-foreground">
-                                            {dict.modelConfig.addProviderHint}
-                                        </p>
-                                    </div>
-                                ) : (
-                                    config.providers.map((provider) => (
-                                        <button
-                                            key={provider.id}
-                                            type="button"
-                                            onClick={() => {
-                                                setSelectedProviderId(
-                                                    provider.id,
-                                                )
-                                                setValidationStatus("idle")
-                                                setShowApiKey(false)
-                                            }}
-                                            className={cn(
-                                                "group flex items-center gap-3 px-3 py-2.5 rounded-xl w-full",
-                                                "text-left text-sm transition-all duration-150 border border-transparent",
-                                                "hover:bg-interactive-hover",
-                                                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
-                                                selectedProviderId ===
-                                                    provider.id &&
-                                                    "bg-surface-0 shadow-sm border-border-subtle",
-                                            )}
-                                        >
-                                            <div
-                                                className={cn(
-                                                    "w-8 h-8 rounded-lg flex items-center justify-center",
-                                                    "bg-surface-2 transition-colors duration-150",
-                                                    selectedProviderId ===
-                                                        provider.id &&
-                                                        "bg-primary/10",
-                                                )}
-                                            >
-                                                <ProviderLogo
-                                                    provider={provider.provider}
-                                                    className="flex-shrink-0"
-                                                />
-                                            </div>
-                                            <span className="flex-1 truncate font-medium">
-                                                {getProviderDisplayName(
-                                                    provider,
-                                                )}
-                                            </span>
-                                            {provider.validated ? (
-                                                <div className="flex-shrink-0 flex items-center justify-center w-5 h-5 rounded-full bg-success-muted">
-                                                    <Check className="h-3 w-3 text-success" />
-                                                </div>
-                                            ) : (
-                                                <ChevronRight
-                                                    className={cn(
-                                                        "h-4 w-4 text-muted-foreground/50 transition-transform duration-150",
-                                                        selectedProviderId ===
-                                                            provider.id &&
-                                                            "translate-x-0.5",
-                                                    )}
-                                                />
-                                            )}
-                                        </button>
-                                    ))
-                                )}
-                            </div>
-                        </ScrollArea>
-
-                        {/* Add Provider */}
-                        <div className="p-3 border-t border-border-subtle">
-                            <Select
-                                onValueChange={(v) =>
-                                    handleAddProvider(v as ProviderName)
-                                }
-                            >
-                                <SelectTrigger className="w-full h-9 rounded-xl bg-surface-0 border-border-subtle hover:bg-interactive-hover">
-                                    <Plus className="h-4 w-4 mr-2 text-muted-foreground" />
-                                    <SelectValue
-                                        placeholder={
-                                            dict.modelConfig.addProvider
-                                        }
-                                    />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    {availableProviders.map((p) => (
-                                        <SelectItem
-                                            key={p}
-                                            value={p}
-                                            className="cursor-pointer"
-                                        >
-                                            <div className="flex items-center gap-2">
-                                                <ProviderLogo provider={p} />
-                                                <span>
-                                                    {PROVIDER_INFO[p].label}
-                                                </span>
-                                            </div>
-                                        </SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
-                        </div>
-                    </div>
-
-                    {/* Provider Details (Right Panel) */}
-                    <div className="flex-1 min-w-0 flex flex-col overflow-auto scrollbar-thin">
-                        {selectedProvider ? (
-                            <ScrollArea className="flex-1" ref={scrollRef}>
-                                <div className="p-6 space-y-8">
-                                    {/* Provider Header */}
-                                    <div className="flex items-center gap-3">
-                                        <div className="flex items-center justify-center w-12 h-12 rounded-xl bg-surface-2">
-                                            <ProviderLogo
-                                                provider={
-                                                    selectedProvider.provider
-                                                }
-                                                className="h-6 w-6"
-                                            />
-                                        </div>
-                                        <div className="flex-1 min-w-0">
-                                            <h3 className="font-semibold text-lg tracking-tight">
-                                                {
-                                                    PROVIDER_INFO[
-                                                        selectedProvider
-                                                            .provider
-                                                    ].label
-                                                }
-                                            </h3>
-                                            <p className="text-sm text-muted-foreground">
-                                                {selectedProvider.models
-                                                    .length === 0
-                                                    ? dict.modelConfig
-                                                          .noModelsConfigured
-                                                    : formatMessage(
-                                                          dict.modelConfig
-                                                              .modelsConfiguredCount,
-                                                          {
-                                                              count: selectedProvider
-                                                                  .models
-                                                                  .length,
-                                                          },
-                                                      )}
-                                            </p>
-                                        </div>
-                                        {selectedProvider.validated && (
-                                            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-success-muted text-success">
-                                                <Check className="h-3.5 w-3.5 animate-check-pop" />
-                                                <span className="text-xs font-medium">
-                                                    {dict.modelConfig.verified}
-                                                </span>
-                                            </div>
-                                        )}
-                                        <Button
-                                            variant="ghost"
-                                            size="sm"
-                                            onClick={() =>
-                                                setDeleteConfirmOpen(true)
-                                            }
-                                            className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                                        >
-                                            <Trash2 className="h-4 w-4 mr-1.5" />
-                                            {dict.modelConfig.deleteProvider}
-                                        </Button>
-                                    </div>
-
-                                    {/* Configuration Section */}
-                                    <ConfigSection
-                                        title={dict.modelConfig.configuration}
-                                        icon={Settings2}
-                                    >
-                                        <ConfigCard>
-                                            {/* Display Name */}
-                                            <div className="space-y-2">
-                                                <Label
-                                                    htmlFor="provider-name"
-                                                    className="text-xs font-medium flex items-center gap-1.5"
-                                                >
-                                                    <Tag className="h-3.5 w-3.5 text-muted-foreground" />
-                                                    {
-                                                        dict.modelConfig
-                                                            .displayName
-                                                    }
-                                                </Label>
-                                                <Input
-                                                    id="provider-name"
-                                                    value={
-                                                        selectedProvider.name ||
-                                                        ""
-                                                    }
-                                                    onChange={(e) =>
-                                                        handleProviderUpdate(
-                                                            "name",
-                                                            e.target.value,
-                                                        )
-                                                    }
-                                                    placeholder={
-                                                        PROVIDER_INFO[
-                                                            selectedProvider
-                                                                .provider
-                                                        ].label
-                                                    }
-                                                    className="h-9"
-                                                />
-                                            </div>
-
-                                            {/* Credentials - different for Bedrock vs other providers */}
-                                            {selectedProvider.provider ===
-                                            "bedrock" ? (
-                                                <>
-                                                    {/* AWS Access Key ID */}
-                                                    <div className="space-y-2">
-                                                        <Label
-                                                            htmlFor="aws-access-key-id"
-                                                            className="text-xs font-medium flex items-center gap-1.5"
-                                                        >
-                                                            <Key className="h-3.5 w-3.5 text-muted-foreground" />
-                                                            {
-                                                                dict.modelConfig
-                                                                    .awsAccessKeyId
-                                                            }
-                                                        </Label>
-                                                        <Input
-                                                            id="aws-access-key-id"
-                                                            type={
-                                                                showApiKey
-                                                                    ? "text"
-                                                                    : "password"
-                                                            }
-                                                            value={
-                                                                selectedProvider.awsAccessKeyId ||
-                                                                ""
-                                                            }
-                                                            onChange={(e) =>
-                                                                handleProviderUpdate(
-                                                                    "awsAccessKeyId",
-                                                                    e.target
-                                                                        .value,
-                                                                )
-                                                            }
-                                                            placeholder="AKIA..."
-                                                            className="h-9 font-mono text-xs"
-                                                        />
-                                                    </div>
-
-                                                    {/* AWS Secret Access Key */}
-                                                    <div className="space-y-2">
-                                                        <Label
-                                                            htmlFor="aws-secret-access-key"
-                                                            className="text-xs font-medium flex items-center gap-1.5"
-                                                        >
-                                                            <Key className="h-3.5 w-3.5 text-muted-foreground" />
-                                                            {
-                                                                dict.modelConfig
-                                                                    .awsSecretAccessKey
-                                                            }
-                                                        </Label>
-                                                        <div className="relative">
-                                                            <Input
-                                                                id="aws-secret-access-key"
-                                                                type={
-                                                                    showApiKey
-                                                                        ? "text"
-                                                                        : "password"
-                                                                }
-                                                                value={
-                                                                    selectedProvider.awsSecretAccessKey ||
-                                                                    ""
-                                                                }
-                                                                onChange={(e) =>
-                                                                    handleProviderUpdate(
-                                                                        "awsSecretAccessKey",
-                                                                        e.target
-                                                                            .value,
-                                                                    )
-                                                                }
-                                                                placeholder={
-                                                                    dict
-                                                                        .modelConfig
-                                                                        .enterSecretKey
-                                                                }
-                                                                className="h-9 pr-10 font-mono text-xs"
-                                                            />
-                                                            <button
-                                                                type="button"
-                                                                onClick={() =>
-                                                                    setShowApiKey(
-                                                                        !showApiKey,
-                                                                    )
-                                                                }
-                                                                aria-label={
-                                                                    showApiKey
-                                                                        ? "Hide secret access key"
-                                                                        : "Show secret access key"
-                                                                }
-                                                                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded"
-                                                            >
-                                                                {showApiKey ? (
-                                                                    <EyeOff className="h-4 w-4" />
-                                                                ) : (
-                                                                    <Eye className="h-4 w-4" />
-                                                                )}
-                                                            </button>
-                                                        </div>
-                                                    </div>
-
-                                                    {/* AWS Region */}
-                                                    <div className="space-y-2">
-                                                        <Label
-                                                            htmlFor="aws-region"
-                                                            className="text-xs font-medium flex items-center gap-1.5"
-                                                        >
-                                                            <Link2 className="h-3.5 w-3.5 text-muted-foreground" />
-                                                            {
-                                                                dict.modelConfig
-                                                                    .awsRegion
-                                                            }
-                                                        </Label>
-                                                        <Select
-                                                            value={
-                                                                selectedProvider.awsRegion ||
-                                                                ""
-                                                            }
-                                                            onValueChange={(
-                                                                v,
-                                                            ) =>
-                                                                handleProviderUpdate(
-                                                                    "awsRegion",
-                                                                    v,
-                                                                )
-                                                            }
-                                                        >
-                                                            <SelectTrigger className="h-9 font-mono text-xs hover:bg-accent">
-                                                                <SelectValue
-                                                                    placeholder={
-                                                                        dict
-                                                                            .modelConfig
-                                                                            .selectRegion
-                                                                    }
-                                                                />
-                                                            </SelectTrigger>
-                                                            <SelectContent className="max-h-64">
-                                                                <SelectItem value="us-east-1">
-                                                                    us-east-1
-                                                                    (N.
-                                                                    Virginia)
-                                                                </SelectItem>
-                                                                <SelectItem value="us-east-2">
-                                                                    us-east-2
-                                                                    (Ohio)
-                                                                </SelectItem>
-                                                                <SelectItem value="us-west-2">
-                                                                    us-west-2
-                                                                    (Oregon)
-                                                                </SelectItem>
-                                                                <SelectItem value="eu-west-1">
-                                                                    eu-west-1
-                                                                    (Ireland)
-                                                                </SelectItem>
-                                                                <SelectItem value="eu-west-2">
-                                                                    eu-west-2
-                                                                    (London)
-                                                                </SelectItem>
-                                                                <SelectItem value="eu-west-3">
-                                                                    eu-west-3
-                                                                    (Paris)
-                                                                </SelectItem>
-                                                                <SelectItem value="eu-central-1">
-                                                                    eu-central-1
-                                                                    (Frankfurt)
-                                                                </SelectItem>
-                                                                <SelectItem value="ap-south-1">
-                                                                    ap-south-1
-                                                                    (Mumbai)
-                                                                </SelectItem>
-                                                                <SelectItem value="ap-northeast-1">
-                                                                    ap-northeast-1
-                                                                    (Tokyo)
-                                                                </SelectItem>
-                                                                <SelectItem value="ap-northeast-2">
-                                                                    ap-northeast-2
-                                                                    (Seoul)
-                                                                </SelectItem>
-                                                                <SelectItem value="ap-southeast-1">
-                                                                    ap-southeast-1
-                                                                    (Singapore)
-                                                                </SelectItem>
-                                                                <SelectItem value="ap-southeast-2">
-                                                                    ap-southeast-2
-                                                                    (Sydney)
-                                                                </SelectItem>
-                                                                <SelectItem value="sa-east-1">
-                                                                    sa-east-1
-                                                                    (São Paulo)
-                                                                </SelectItem>
-                                                            </SelectContent>
-                                                        </Select>
-                                                    </div>
-
-                                                    {/* Test Button for Bedrock */}
-                                                    <div className="flex items-center gap-2">
-                                                        <Button
-                                                            variant={
-                                                                validationStatus ===
-                                                                "success"
-                                                                    ? "outline"
-                                                                    : "default"
-                                                            }
-                                                            size="sm"
-                                                            onClick={
-                                                                handleValidate
-                                                            }
-                                                            disabled={
-                                                                !selectedProvider.awsAccessKeyId ||
-                                                                !selectedProvider.awsSecretAccessKey ||
-                                                                !selectedProvider.awsRegion ||
-                                                                validationStatus ===
-                                                                    "validating"
-                                                            }
-                                                            className={cn(
-                                                                "h-9 px-4",
-                                                                validationStatus ===
-                                                                    "success" &&
-                                                                    "text-success border-success/30 bg-success-muted hover:bg-success-muted",
-                                                            )}
-                                                        >
-                                                            {validationStatus ===
-                                                            "validating" ? (
-                                                                <Loader2 className="h-4 w-4 animate-spin" />
-                                                            ) : validationStatus ===
-                                                              "success" ? (
-                                                                <>
-                                                                    <Check className="h-4 w-4 mr-1.5 animate-check-pop" />
-                                                                    {
-                                                                        dict
-                                                                            .modelConfig
-                                                                            .verified
-                                                                    }
-                                                                </>
-                                                            ) : (
-                                                                dict.modelConfig
-                                                                    .test
-                                                            )}
-                                                        </Button>
-                                                        {validationStatus ===
-                                                            "error" &&
-                                                            validationError && (
-                                                                <p className="text-xs text-destructive flex items-center gap-1">
-                                                                    <X className="h-3 w-3" />
-                                                                    {
-                                                                        validationError
-                                                                    }
-                                                                </p>
-                                                            )}
-                                                    </div>
-                                                </>
-                                            ) : selectedProvider.provider ===
-                                              "vertexai" ? (
-                                                <>
-                                                    {/* Vertex AI API Key */}
-                                                    <div className="space-y-2">
-                                                        <Label
-                                                            htmlFor="vertex-api-key"
-                                                            className="text-xs font-medium flex items-center gap-1.5"
-                                                        >
-                                                            <Key className="h-3.5 w-3.5 text-muted-foreground" />
-                                                            API Key
-                                                        </Label>
-                                                        <div className="flex gap-2">
-                                                            <div className="relative flex-1">
-                                                                <Input
-                                                                    id="vertex-api-key"
-                                                                    type={
-                                                                        showApiKey
-                                                                            ? "text"
-                                                                            : "password"
-                                                                    }
-                                                                    value={
-                                                                        selectedProvider.vertexApiKey ||
-                                                                        ""
-                                                                    }
-                                                                    onChange={(
-                                                                        e,
-                                                                    ) =>
-                                                                        handleProviderUpdate(
-                                                                            "vertexApiKey",
-                                                                            e
-                                                                                .target
-                                                                                .value,
-                                                                        )
-                                                                    }
-                                                                    placeholder="Enter your Vertex AI API key"
-                                                                    className="h-9 pr-10 font-mono text-xs"
-                                                                />
-                                                                <button
-                                                                    type="button"
-                                                                    onClick={() =>
-                                                                        setShowApiKey(
-                                                                            !showApiKey,
-                                                                        )
-                                                                    }
-                                                                    aria-label={
-                                                                        showApiKey
-                                                                            ? "Hide API key"
-                                                                            : "Show API key"
-                                                                    }
-                                                                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded"
-                                                                >
-                                                                    {showApiKey ? (
-                                                                        <EyeOff className="h-4 w-4" />
-                                                                    ) : (
-                                                                        <Eye className="h-4 w-4" />
-                                                                    )}
-                                                                </button>
-                                                            </div>
-                                                            <Button
-                                                                variant={
-                                                                    validationStatus ===
-                                                                    "success"
-                                                                        ? "outline"
-                                                                        : "default"
-                                                                }
-                                                                size="sm"
-                                                                onClick={
-                                                                    handleValidate
-                                                                }
-                                                                disabled={
-                                                                    !selectedProvider.vertexApiKey ||
-                                                                    validationStatus ===
-                                                                        "validating"
-                                                                }
-                                                                className={cn(
-                                                                    "h-9 px-4",
-                                                                    validationStatus ===
-                                                                        "success" &&
-                                                                        "text-success border-success/30 bg-success-muted hover:bg-success-muted",
-                                                                )}
-                                                            >
-                                                                {validationStatus ===
-                                                                "validating" ? (
-                                                                    <Loader2 className="h-4 w-4 animate-spin" />
-                                                                ) : validationStatus ===
-                                                                  "success" ? (
-                                                                    <>
-                                                                        <Check className="h-4 w-4 mr-1.5 animate-check-pop" />
-                                                                        {
-                                                                            dict
-                                                                                .modelConfig
-                                                                                .verified
-                                                                        }
-                                                                    </>
-                                                                ) : (
-                                                                    dict
-                                                                        .modelConfig
-                                                                        .test
-                                                                )}
-                                                            </Button>
-                                                        </div>
-                                                        {validationStatus ===
-                                                            "error" &&
-                                                            validationError && (
-                                                                <p className="text-xs text-destructive flex items-center gap-1">
-                                                                    <X className="h-3 w-3" />
-                                                                    {
-                                                                        validationError
-                                                                    }
-                                                                </p>
-                                                            )}
-                                                    </div>
-
-                                                    {/* Base URL (optional) */}
-                                                    <div className="space-y-2">
-                                                        <Label
-                                                            htmlFor="vertex-base-url"
-                                                            className="text-xs font-medium flex items-center gap-1.5"
-                                                        >
-                                                            <Link2 className="h-3.5 w-3.5 text-muted-foreground" />
-                                                            {formatMessage(
-                                                                dict.modelConfig
-                                                                    .baseUrlWithExample,
-                                                                {
-                                                                    example:
-                                                                        PROVIDER_INFO[
-                                                                            selectedProvider
-                                                                                .provider
-                                                                        ]
-                                                                            .defaultBaseUrl ||
-                                                                        "https://api.example.com/v1",
-                                                                },
-                                                            )}
-                                                        </Label>
-                                                        <Input
-                                                            id="vertex-base-url"
-                                                            value={
-                                                                selectedProvider.baseUrl ||
-                                                                ""
-                                                            }
-                                                            onChange={(e) =>
-                                                                handleProviderUpdate(
-                                                                    "baseUrl",
-                                                                    e.target
-                                                                        .value,
-                                                                )
-                                                            }
-                                                            placeholder="Custom endpoint URL"
-                                                            className="h-9 font-mono text-xs"
-                                                        />
-                                                    </div>
-                                                </>
-                                            ) : selectedProvider.provider ===
-                                              "edgeone" ? (
-                                                <div className="space-y-3">
-                                                    <div className="flex items-center gap-2">
-                                                        <Button
-                                                            variant={
-                                                                validationStatus ===
-                                                                "success"
-                                                                    ? "outline"
-                                                                    : "default"
-                                                            }
-                                                            size="sm"
-                                                            onClick={
-                                                                handleValidate
-                                                            }
-                                                            disabled={
-                                                                validationStatus ===
-                                                                "validating"
-                                                            }
-                                                            className={cn(
-                                                                "h-9 px-4",
-                                                                validationStatus ===
-                                                                    "success" &&
-                                                                    "text-success border-success/30 bg-success-muted hover:bg-success-muted",
-                                                            )}
-                                                        >
-                                                            {validationStatus ===
-                                                            "validating" ? (
-                                                                <Loader2 className="h-4 w-4 animate-spin" />
-                                                            ) : validationStatus ===
-                                                              "success" ? (
-                                                                <>
-                                                                    <Check className="h-4 w-4 mr-1.5" />
-                                                                    {
-                                                                        dict
-                                                                            .modelConfig
-                                                                            .verified
-                                                                    }
-                                                                </>
-                                                            ) : (
-                                                                dict.modelConfig
-                                                                    .test
-                                                            )}
-                                                        </Button>
-                                                        {validationStatus ===
-                                                            "error" &&
-                                                            validationError && (
-                                                                <p className="text-xs text-destructive flex items-center gap-1">
-                                                                    <X className="h-3 w-3" />
-                                                                    {
-                                                                        validationError
-                                                                    }
-                                                                </p>
-                                                            )}
-                                                    </div>
-                                                </div>
-                                            ) : (
-                                                <>
-                                                    {/* API Key */}
-                                                    <div className="space-y-2">
-                                                        <Label
-                                                            htmlFor="api-key"
-                                                            className="text-xs font-medium flex items-center gap-1.5"
-                                                        >
-                                                            <Key className="h-3.5 w-3.5 text-muted-foreground" />
-                                                            {
-                                                                dict.modelConfig
-                                                                    .apiKey
-                                                            }
-                                                            {selectedProvider.provider ===
-                                                                "ollama" &&
-                                                                ` ${dict.modelConfig.optional}`}
-                                                        </Label>
-                                                        <div className="flex gap-2">
-                                                            <div className="relative flex-1">
-                                                                <Input
-                                                                    id="api-key"
-                                                                    type={
-                                                                        showApiKey
-                                                                            ? "text"
-                                                                            : "password"
-                                                                    }
-                                                                    value={
-                                                                        selectedProvider.apiKey
-                                                                    }
-                                                                    onChange={(
-                                                                        e,
-                                                                    ) =>
-                                                                        handleProviderUpdate(
-                                                                            "apiKey",
-                                                                            e
-                                                                                .target
-                                                                                .value,
-                                                                        )
-                                                                    }
-                                                                    placeholder={
-                                                                        dict
-                                                                            .modelConfig
-                                                                            .enterApiKey
-                                                                    }
-                                                                    className="h-9 pr-10 font-mono text-xs"
-                                                                />
-                                                                <button
-                                                                    type="button"
-                                                                    onClick={() =>
-                                                                        setShowApiKey(
-                                                                            !showApiKey,
-                                                                        )
-                                                                    }
-                                                                    aria-label={
-                                                                        showApiKey
-                                                                            ? "Hide API key"
-                                                                            : "Show API key"
-                                                                    }
-                                                                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded"
-                                                                >
-                                                                    {showApiKey ? (
-                                                                        <EyeOff className="h-4 w-4" />
-                                                                    ) : (
-                                                                        <Eye className="h-4 w-4" />
-                                                                    )}
-                                                                </button>
-                                                            </div>
-                                                            <Button
-                                                                variant={
-                                                                    validationStatus ===
-                                                                    "success"
-                                                                        ? "outline"
-                                                                        : "default"
-                                                                }
-                                                                size="sm"
-                                                                onClick={
-                                                                    handleValidate
-                                                                }
-                                                                disabled={
-                                                                    (selectedProvider.provider !==
-                                                                        "ollama" &&
-                                                                        !selectedProvider.apiKey) ||
-                                                                    validationStatus ===
-                                                                        "validating"
-                                                                }
-                                                                className={cn(
-                                                                    "h-9 px-4",
-                                                                    validationStatus ===
-                                                                        "success" &&
-                                                                        "text-success border-success/30 bg-success-muted hover:bg-success-muted",
-                                                                )}
-                                                            >
-                                                                {validationStatus ===
-                                                                "validating" ? (
-                                                                    <Loader2 className="h-4 w-4 animate-spin" />
-                                                                ) : validationStatus ===
-                                                                  "success" ? (
-                                                                    <>
-                                                                        <Check className="h-4 w-4 mr-1.5 animate-check-pop" />
-                                                                        {
-                                                                            dict
-                                                                                .modelConfig
-                                                                                .verified
-                                                                        }
-                                                                    </>
-                                                                ) : (
-                                                                    dict
-                                                                        .modelConfig
-                                                                        .test
-                                                                )}
-                                                            </Button>
-                                                        </div>
-                                                        {validationStatus ===
-                                                            "error" &&
-                                                            validationError && (
-                                                                <p className="text-xs text-destructive flex items-center gap-1">
-                                                                    <X className="h-3 w-3" />
-                                                                    {
-                                                                        validationError
-                                                                    }
-                                                                </p>
-                                                            )}
-                                                    </div>
-
-                                                    {/* Base URL */}
-                                                    <div className="space-y-2">
-                                                        <Label
-                                                            htmlFor="base-url"
-                                                            className="text-xs font-medium flex items-center gap-1.5"
-                                                        >
-                                                            <Link2 className="h-3.5 w-3.5 text-muted-foreground" />
-                                                            {formatMessage(
-                                                                dict.modelConfig
-                                                                    .baseUrlWithExample,
-                                                                {
-                                                                    example:
-                                                                        PROVIDER_INFO[
-                                                                            selectedProvider
-                                                                                .provider
-                                                                        ]
-                                                                            .defaultBaseUrl ||
-                                                                        "https://api.example.com/v1",
-                                                                },
-                                                            )}
-                                                        </Label>
-                                                        <Input
-                                                            id="base-url"
-                                                            value={
-                                                                selectedProvider.baseUrl ||
-                                                                ""
-                                                            }
-                                                            onChange={(e) =>
-                                                                handleProviderUpdate(
-                                                                    "baseUrl",
-                                                                    e.target
-                                                                        .value,
-                                                                )
-                                                            }
-                                                            placeholder={
-                                                                PROVIDER_INFO[
-                                                                    selectedProvider
-                                                                        .provider
-                                                                ]
-                                                                    .defaultBaseUrl ||
-                                                                dict.modelConfig
-                                                                    .customEndpoint
-                                                            }
-                                                            className="h-9 rounded-xl font-mono text-xs"
-                                                        />
-                                                        {selectedProvider.provider ===
-                                                            "minimax" && (
-                                                            <p className="text-xs text-muted-foreground">
-                                                                {
-                                                                    dict
-                                                                        .modelConfig
-                                                                        .minimaxBaseUrlHint
-                                                                }
-                                                            </p>
-                                                        )}
-                                                    </div>
-                                                </>
-                                            )}
-                                        </ConfigCard>
-                                    </ConfigSection>
-
-                                    {/* Models Section */}
-                                    <ConfigSection
-                                        title={dict.modelConfig.models}
-                                        icon={Sparkles}
-                                        action={
-                                            <div className="flex items-center gap-2">
-                                                <div className="relative">
-                                                    <Input
-                                                        placeholder={
-                                                            dict.modelConfig
-                                                                .customModelId
-                                                        }
-                                                        value={customModelInput}
-                                                        onChange={(e) => {
-                                                            setCustomModelInput(
-                                                                e.target.value,
-                                                            )
-                                                            if (
-                                                                duplicateError
-                                                            ) {
-                                                                setDuplicateError(
-                                                                    "",
-                                                                )
-                                                            }
-                                                        }}
-                                                        onKeyDown={(e) => {
-                                                            if (
-                                                                e.key ===
-                                                                    "Enter" &&
-                                                                customModelInput.trim()
-                                                            ) {
-                                                                const success =
-                                                                    handleAddModel(
-                                                                        customModelInput.trim(),
-                                                                    )
-                                                                if (success) {
-                                                                    setCustomModelInput(
-                                                                        "",
-                                                                    )
-                                                                }
-                                                            }
-                                                        }}
-                                                        className={cn(
-                                                            "h-8 w-44 rounded-lg font-mono text-xs",
-                                                            duplicateError &&
-                                                                "border-destructive focus-visible:ring-destructive",
-                                                        )}
-                                                    />
-                                                    {duplicateError && (
-                                                        <p className="absolute top-full left-0 mt-1 text-[11px] text-destructive">
-                                                            {duplicateError}
-                                                        </p>
-                                                    )}
-                                                </div>
-                                                <Button
-                                                    variant="outline"
-                                                    size="sm"
-                                                    className="h-8 rounded-lg"
-                                                    onClick={() => {
-                                                        if (
-                                                            customModelInput.trim()
-                                                        ) {
-                                                            const success =
-                                                                handleAddModel(
-                                                                    customModelInput.trim(),
-                                                                )
-                                                            if (success) {
-                                                                setCustomModelInput(
-                                                                    "",
-                                                                )
-                                                            }
-                                                        }
-                                                    }}
-                                                    disabled={
-                                                        !customModelInput.trim()
-                                                    }
-                                                >
-                                                    <Plus className="h-3.5 w-3.5" />
-                                                </Button>
-                                                <Select
-                                                    onValueChange={(value) => {
-                                                        if (value) {
-                                                            handleAddModel(
-                                                                value,
-                                                            )
-                                                        }
-                                                    }}
-                                                    disabled={
-                                                        availableSuggestions.length ===
-                                                        0
-                                                    }
-                                                >
-                                                    <SelectTrigger className="w-28 h-8 rounded-lg hover:bg-interactive-hover">
-                                                        <span className="text-xs">
-                                                            {availableSuggestions.length ===
-                                                            0
-                                                                ? dict
-                                                                      .modelConfig
-                                                                      .allAdded
-                                                                : dict
-                                                                      .modelConfig
-                                                                      .suggested}
-                                                        </span>
-                                                    </SelectTrigger>
-                                                    <SelectContent className="max-h-72">
-                                                        {availableSuggestions.map(
-                                                            (modelId) => (
-                                                                <SelectItem
-                                                                    key={
-                                                                        modelId
-                                                                    }
-                                                                    value={
-                                                                        modelId
-                                                                    }
-                                                                    className="font-mono text-xs"
-                                                                >
-                                                                    {modelId}
-                                                                </SelectItem>
-                                                            ),
-                                                        )}
-                                                    </SelectContent>
-                                                </Select>
-
-                                                {/* Fetch from API Popover */}
-                                                <Popover
-                                                    open={showModelFetcher}
-                                                    onOpenChange={(open) => {
-                                                        setShowModelFetcher(
-                                                            open,
-                                                        )
-                                                        if (open) {
-                                                            handleFetchModels()
-                                                        }
-                                                    }}
-                                                >
-                                                    <PopoverTrigger asChild>
-                                                        <Button
-                                                            variant="outline"
-                                                            size="sm"
-                                                            className="h-8 rounded-lg"
-                                                        >
-                                                            <RefreshCw
-                                                                className={cn(
-                                                                    "h-3.5 w-3.5 mr-1",
-                                                                    isFetchingModels &&
-                                                                        "animate-spin",
-                                                                )}
-                                                            />
-                                                            <span className="text-xs">
-                                                                {
-                                                                    dict
-                                                                        .modelConfig
-                                                                        .fetchFromApi
-                                                                }
-                                                            </span>
-                                                        </Button>
-                                                    </PopoverTrigger>
-                                                    <PopoverContent
-                                                        className="w-80 p-0 bg-background border border-border shadow-lg rounded-xl flex flex-col max-h-[360px] overflow-hidden"
-                                                        align="end"
-                                                    >
-                                                        {/* Popover Header */}
-                                                        <div className="flex items-center justify-between px-3 py-2 border-b border-border-subtle bg-background shrink-0">
-                                                            <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                                                                {
-                                                                    dict
-                                                                        .modelConfig
-                                                                        .fetchedModelsTitle
-                                                                }
-                                                            </span>
-                                                            <button
-                                                                type="button"
-                                                                onClick={
-                                                                    handleFetchModels
-                                                                }
-                                                                disabled={
-                                                                    isFetchingModels
-                                                                }
-                                                                className="p-1 rounded text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
-                                                                aria-label="Refresh model list"
-                                                            >
-                                                                <RefreshCw
-                                                                    className={cn(
-                                                                        "h-3.5 w-3.5",
-                                                                        isFetchingModels &&
-                                                                            "animate-spin",
-                                                                    )}
-                                                                />
-                                                            </button>
-                                                        </div>
-
-                                                        {/* Popover Body */}
-                                                        {isFetchingModels ? (
-                                                            <div className="flex items-center justify-center py-8">
-                                                                <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-                                                            </div>
-                                                        ) : fetchModelsError ? (
-                                                            <div className="px-3 py-5 text-center space-y-1">
-                                                                <AlertCircle className="h-5 w-5 text-destructive mx-auto" />
-                                                                <p className="text-xs text-destructive">
-                                                                    {
-                                                                        fetchModelsError
-                                                                    }
-                                                                </p>
-                                                            </div>
-                                                        ) : fetchedModels.length ===
-                                                          0 ? (
-                                                            <div className="px-3 py-5 text-center">
-                                                                <p className="text-xs text-muted-foreground">
-                                                                    {
-                                                                        dict
-                                                                            .modelConfig
-                                                                            .noModelsFound
-                                                                    }
-                                                                </p>
-                                                            </div>
-                                                        ) : (
-                                                            <div className="flex flex-col overflow-hidden">
-                                                                {/* Select All / Deselect All */}
-                                                                <div className="flex items-center gap-1 px-3 py-1.5 border-b border-border-subtle bg-background">
-                                                                    <button
-                                                                        type="button"
-                                                                        className="text-[11px] text-muted-foreground hover:text-foreground px-1.5 py-0.5 rounded transition-colors"
-                                                                        onClick={() =>
-                                                                            setSelectedFetchedModelIds(
-                                                                                new Set(
-                                                                                    fetchedModels.filter(
-                                                                                        (
-                                                                                            m,
-                                                                                        ) =>
-                                                                                            !existingModelIds.includes(
-                                                                                                m,
-                                                                                            ),
-                                                                                    ),
-                                                                                ),
-                                                                            )
-                                                                        }
-                                                                    >
-                                                                        {
-                                                                            dict
-                                                                                .modelConfig
-                                                                                .selectAll
-                                                                        }
-                                                                    </button>
-                                                                    <span className="text-muted-foreground/50 text-[11px]">
-                                                                        /
-                                                                    </span>
-                                                                    <button
-                                                                        type="button"
-                                                                        className="text-[11px] text-muted-foreground hover:text-foreground px-1.5 py-0.5 rounded transition-colors"
-                                                                        onClick={() =>
-                                                                            setSelectedFetchedModelIds(
-                                                                                new Set(),
-                                                                            )
-                                                                        }
-                                                                    >
-                                                                        {
-                                                                            dict
-                                                                                .modelConfig
-                                                                                .deselectAll
-                                                                        }
-                                                                    </button>
-                                                                    <span className="ml-auto text-[11px] text-muted-foreground">
-                                                                        {
-                                                                            fetchedModels.length
-                                                                        }{" "}
-                                                                        models
-                                                                    </span>
-                                                                </div>
-
-                                                                {/* Model list - scrollable */}
-                                                                <div
-                                                                    className="overflow-y-auto"
-                                                                    style={{
-                                                                        maxHeight:
-                                                                            "240px",
-                                                                    }}
-                                                                >
-                                                                    <div className="py-1">
-                                                                        {fetchedModels.map(
-                                                                            (
-                                                                                modelId,
-                                                                            ) => {
-                                                                                const isAlreadyAdded =
-                                                                                    existingModelIds.includes(
-                                                                                        modelId,
-                                                                                    )
-                                                                                const isChecked =
-                                                                                    selectedFetchedModelIds.has(
-                                                                                        modelId,
-                                                                                    ) ||
-                                                                                    isAlreadyAdded
-                                                                                return (
-                                                                                    <button
-                                                                                        key={
-                                                                                            modelId
-                                                                                        }
-                                                                                        type="button"
-                                                                                        disabled={
-                                                                                            isAlreadyAdded
-                                                                                        }
-                                                                                        onClick={() => {
-                                                                                            if (
-                                                                                                isAlreadyAdded
-                                                                                            )
-                                                                                                return
-                                                                                            setSelectedFetchedModelIds(
-                                                                                                (
-                                                                                                    prev,
-                                                                                                ) => {
-                                                                                                    const next =
-                                                                                                        new Set(
-                                                                                                            prev,
-                                                                                                        )
-                                                                                                    if (
-                                                                                                        next.has(
-                                                                                                            modelId,
-                                                                                                        )
-                                                                                                    )
-                                                                                                        next.delete(
-                                                                                                            modelId,
-                                                                                                        )
-                                                                                                    else
-                                                                                                        next.add(
-                                                                                                            modelId,
-                                                                                                        )
-                                                                                                    return next
-                                                                                                },
-                                                                                            )
-                                                                                        }}
-                                                                                        className={cn(
-                                                                                            "w-full flex items-center gap-2 px-3 py-1.5 text-left transition-colors",
-                                                                                            "hover:bg-interactive-hover",
-                                                                                            isAlreadyAdded &&
-                                                                                                "opacity-50 cursor-not-allowed",
-                                                                                        )}
-                                                                                    >
-                                                                                        {/* Checkbox */}
-                                                                                        <div
-                                                                                            className={cn(
-                                                                                                "w-3.5 h-3.5 rounded border flex-shrink-0 flex items-center justify-center transition-colors",
-                                                                                                isChecked
-                                                                                                    ? "bg-primary border-primary"
-                                                                                                    : "border-border-subtle bg-background",
-                                                                                            )}
-                                                                                        >
-                                                                                            {isChecked && (
-                                                                                                <Check className="h-2.5 w-2.5 text-primary-foreground" />
-                                                                                            )}
-                                                                                        </div>
-                                                                                        <span className="font-mono text-xs truncate flex-1">
-                                                                                            {
-                                                                                                modelId
-                                                                                            }
-                                                                                        </span>
-                                                                                        {isAlreadyAdded && (
-                                                                                            <span className="text-[10px] text-muted-foreground shrink-0">
-                                                                                                {
-                                                                                                    dict
-                                                                                                        .modelConfig
-                                                                                                        .inList
-                                                                                                }
-                                                                                            </span>
-                                                                                        )}
-                                                                                    </button>
-                                                                                )
-                                                                            },
-                                                                        )}
-                                                                    </div>
-                                                                </div>
-
-                                                                {/* Footer: Add Selected - always visible */}
-                                                                <div className="px-3 py-2 border-t border-border-subtle bg-background">
-                                                                    <Button
-                                                                        size="sm"
-                                                                        className="w-full h-8 rounded-lg text-xs"
-                                                                        disabled={
-                                                                            selectedFetchedModelIds.size ===
-                                                                            0
-                                                                        }
-                                                                        onClick={() => {
-                                                                            for (const modelId of selectedFetchedModelIds) {
-                                                                                if (
-                                                                                    !existingModelIds.includes(
-                                                                                        modelId,
-                                                                                    )
-                                                                                ) {
-                                                                                    handleAddModel(
-                                                                                        modelId,
-                                                                                    )
-                                                                                }
-                                                                            }
-                                                                            setSelectedFetchedModelIds(
-                                                                                new Set(),
-                                                                            )
-                                                                            setShowModelFetcher(
-                                                                                false,
-                                                                            )
-                                                                        }}
-                                                                    >
-                                                                        {
-                                                                            dict
-                                                                                .modelConfig
-                                                                                .addSelected
-                                                                        }{" "}
-                                                                        (
-                                                                        {
-                                                                            selectedFetchedModelIds.size
-                                                                        }
-                                                                        )
-                                                                    </Button>
-                                                                </div>
-                                                            </div>
-                                                        )}
-                                                    </PopoverContent>
-                                                </Popover>
-                                            </div>
-                                        }
-                                    >
-                                        {/* Model List */}
-                                        <div className="rounded-2xl border border-border-subtle bg-surface-2/30 overflow-hidden min-h-[120px]">
-                                            {selectedProvider.models.length ===
-                                            0 ? (
-                                                <div className="p-6 text-center h-full flex flex-col items-center justify-center">
-                                                    <div className="inline-flex items-center justify-center w-10 h-10 rounded-full bg-surface-2 mb-3">
-                                                        <Sparkles className="h-5 w-5 text-muted-foreground" />
-                                                    </div>
-                                                    <p className="text-sm text-muted-foreground">
-                                                        {
-                                                            dict.modelConfig
-                                                                .noModelsConfigured
-                                                        }
-                                                    </p>
-                                                </div>
-                                            ) : (
-                                                <div className="divide-y divide-border-subtle">
-                                                    {selectedProvider.models.map(
-                                                        (model, index) => (
-                                                            <div
-                                                                key={model.id}
-                                                                className={cn(
-                                                                    "transition-colors duration-150 hover:bg-interactive-hover/50",
-                                                                )}
-                                                            >
-                                                                <div className="flex items-center gap-3 p-3 min-w-0">
-                                                                    {/* Status icon */}
-                                                                    <div className="flex items-center justify-center w-8 h-8 rounded-lg flex-shrink-0">
-                                                                        {validatingModelIndex !==
-                                                                            null &&
-                                                                        index ===
-                                                                            validatingModelIndex ? (
-                                                                            // Currently validating
-                                                                            <div className="w-full h-full rounded-lg bg-blue-500/10 flex items-center justify-center">
-                                                                                <Loader2 className="h-4 w-4 text-blue-500 animate-spin" />
-                                                                            </div>
-                                                                        ) : validatingModelIndex !==
-                                                                              null &&
-                                                                          index >
-                                                                              validatingModelIndex &&
-                                                                          model.validated ===
-                                                                              undefined ? (
-                                                                            // Queued
-                                                                            <div className="w-full h-full rounded-lg bg-muted flex items-center justify-center">
-                                                                                <Clock className="h-4 w-4 text-muted-foreground" />
-                                                                            </div>
-                                                                        ) : model.validated ===
-                                                                          true ? (
-                                                                            // Valid
-                                                                            <div className="w-full h-full rounded-lg bg-success-muted flex items-center justify-center">
-                                                                                <Check className="h-4 w-4 text-success" />
-                                                                            </div>
-                                                                        ) : model.validated ===
-                                                                          false ? (
-                                                                            // Invalid
-                                                                            <div className="w-full h-full rounded-lg bg-destructive/10 flex items-center justify-center">
-                                                                                <AlertCircle className="h-4 w-4 text-destructive" />
-                                                                            </div>
-                                                                        ) : (
-                                                                            // Not validated yet
-                                                                            <div className="w-full h-full rounded-lg bg-primary/5 flex items-center justify-center">
-                                                                                <Zap className="h-4 w-4 text-primary" />
-                                                                            </div>
-                                                                        )}
-                                                                    </div>
-                                                                    <Input
-                                                                        value={
-                                                                            model.modelId
-                                                                        }
-                                                                        title={
-                                                                            model.modelId
-                                                                        }
-                                                                        onChange={(
-                                                                            e,
-                                                                        ) => {
-                                                                            // Allow free typing - validation happens on blur
-                                                                            // Clear edit error when typing
-                                                                            if (
-                                                                                editError?.modelId ===
-                                                                                model.id
-                                                                            ) {
-                                                                                setEditError(
-                                                                                    null,
-                                                                                )
-                                                                            }
-                                                                            if (
-                                                                                selectedProviderId
-                                                                            ) {
-                                                                                updateModel(
-                                                                                    selectedProviderId,
-                                                                                    model.id,
-                                                                                    {
-                                                                                        modelId:
-                                                                                            e
-                                                                                                .target
-                                                                                                .value,
-                                                                                        validated:
-                                                                                            undefined,
-                                                                                        validationError:
-                                                                                            undefined,
-                                                                                    },
-                                                                                )
-                                                                            }
-                                                                        }}
-                                                                        onKeyDown={(
-                                                                            e,
-                                                                        ) => {
-                                                                            if (
-                                                                                e.key ===
-                                                                                "Enter"
-                                                                            ) {
-                                                                                e.currentTarget.blur()
-                                                                            }
-                                                                        }}
-                                                                        onBlur={(
-                                                                            e,
-                                                                        ) => {
-                                                                            const newModelId =
-                                                                                e.target.value.trim()
-
-                                                                            // Helper to show error with shake
-                                                                            const showError =
-                                                                                (
-                                                                                    message: string,
-                                                                                ) => {
-                                                                                    setEditError(
-                                                                                        {
-                                                                                            modelId:
-                                                                                                model.id,
-                                                                                            message,
-                                                                                        },
-                                                                                    )
-                                                                                    e.target.animate(
-                                                                                        [
-                                                                                            {
-                                                                                                transform:
-                                                                                                    "translateX(0)",
-                                                                                            },
-                                                                                            {
-                                                                                                transform:
-                                                                                                    "translateX(-4px)",
-                                                                                            },
-                                                                                            {
-                                                                                                transform:
-                                                                                                    "translateX(4px)",
-                                                                                            },
-                                                                                            {
-                                                                                                transform:
-                                                                                                    "translateX(-4px)",
-                                                                                            },
-                                                                                            {
-                                                                                                transform:
-                                                                                                    "translateX(4px)",
-                                                                                            },
-                                                                                            {
-                                                                                                transform:
-                                                                                                    "translateX(0)",
-                                                                                            },
-                                                                                        ],
-                                                                                        {
-                                                                                            duration: 400,
-                                                                                            easing: "ease-in-out",
-                                                                                        },
-                                                                                    )
-                                                                                    e.target.focus()
-                                                                                }
-
-                                                                            // Check for empty model name
-                                                                            if (
-                                                                                !newModelId
-                                                                            ) {
-                                                                                showError(
-                                                                                    dict
-                                                                                        .modelConfig
-                                                                                        .modelIdEmpty,
-                                                                                )
-                                                                                return
-                                                                            }
-
-                                                                            // Check for duplicate
-                                                                            const otherModelIds =
-                                                                                selectedProvider?.models
-                                                                                    .filter(
-                                                                                        (
-                                                                                            m,
-                                                                                        ) =>
-                                                                                            m.id !==
-                                                                                            model.id,
-                                                                                    )
-                                                                                    .map(
-                                                                                        (
-                                                                                            m,
-                                                                                        ) =>
-                                                                                            m.modelId,
-                                                                                    ) ||
-                                                                                []
-                                                                            if (
-                                                                                otherModelIds.includes(
-                                                                                    newModelId,
-                                                                                )
-                                                                            ) {
-                                                                                showError(
-                                                                                    dict
-                                                                                        .modelConfig
-                                                                                        .modelIdExists,
-                                                                                )
-                                                                                return
-                                                                            }
-
-                                                                            // Clear error on valid blur
-                                                                            setEditError(
-                                                                                null,
-                                                                            )
-                                                                        }}
-                                                                        className="flex-1 min-w-0 font-mono text-sm h-8 border-0 bg-transparent focus-visible:bg-background focus-visible:ring-1"
-                                                                    />
-                                                                    <Button
-                                                                        variant="ghost"
-                                                                        size="icon"
-                                                                        className="h-7 w-7 text-muted-foreground hover:text-destructive"
-                                                                        onClick={() =>
-                                                                            handleDeleteModel(
-                                                                                model.id,
-                                                                            )
-                                                                        }
-                                                                        aria-label={`Delete ${model.modelId}`}
-                                                                    >
-                                                                        <X className="h-4 w-4" />
-                                                                    </Button>
-                                                                </div>
-                                                                {/* Show validation error inline */}
-                                                                {model.validated ===
-                                                                    false &&
-                                                                    model.validationError && (
-                                                                        <p className="text-[11px] text-destructive px-3 pb-2 pl-14">
-                                                                            {
-                                                                                model.validationError
-                                                                            }
-                                                                        </p>
-                                                                    )}
-                                                                {/* Show edit error inline */}
-                                                                {editError?.modelId ===
-                                                                    model.id && (
-                                                                    <p className="text-[11px] text-destructive px-3 pb-2 pl-14">
-                                                                        {
-                                                                            editError.message
-                                                                        }
-                                                                    </p>
-                                                                )}
-                                                            </div>
-                                                        ),
-                                                    )}
-                                                </div>
-                                            )}
-                                        </div>
-                                    </ConfigSection>
-                                </div>
-                            </ScrollArea>
-                        ) : (
-                            <div className="h-full flex flex-col items-center justify-center p-8 text-center">
-                                <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-surface-2 mb-4">
-                                    <Server className="h-8 w-8 text-muted-foreground" />
-                                </div>
-                                <h3 className="font-semibold text-lg tracking-tight mb-1">
-                                    {dict.modelConfig.configureProviders}
-                                </h3>
-                                <p className="text-sm text-muted-foreground max-w-xs">
-                                    {dict.modelConfig.selectProviderHint}
-                                </p>
-                            </div>
+        <>
+            <div ref={pageRef} className="flex min-h-0 flex-1 flex-col">
+                {selectedProvider ? (
+                    renderProviderPage(selectedProvider)
+                ) : page === "picker" ? (
+                    <ProviderPicker
+                        added={config.providers.map((p) => p.provider)}
+                        onPick={handleAddProvider}
+                        onBack={() => setModelsPage("list")}
+                    />
+                ) : (
+                    <ProvidersList
+                        providers={config.providers}
+                        serverModels={modelConfig.models.filter(
+                            (m) => m.source === "server",
                         )}
-                    </div>
-                </div>
-
-                {/* Footer */}
-                <div className="px-6 py-3 border-t border-border-subtle bg-surface-1/30 shrink-0">
-                    <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                            <Switch
-                                id="show-unvalidated-models"
-                                checked={modelConfig.showUnvalidatedModels}
-                                onCheckedChange={
-                                    modelConfig.setShowUnvalidatedModels
-                                }
-                            />
-                            <Label
-                                htmlFor="show-unvalidated-models"
-                                className="text-xs text-muted-foreground cursor-pointer"
-                            >
-                                {dict.modelConfig.showUnvalidatedModels}
-                            </Label>
-                        </div>
-                        <p className="text-xs text-muted-foreground flex items-center gap-1.5">
-                            <Key className="h-3 w-3" />
-                            {dict.modelConfig.apiKeyStored}
-                        </p>
-                    </div>
-                </div>
-            </DialogContent>
+                        selectedModelId={modelConfig.selectedModelId}
+                        onOpen={openProvider}
+                        onAdd={handleAddProvider}
+                        onBrowse={() => setModelsPage("picker")}
+                    />
+                )}
+            </div>
 
             {/* Delete Confirmation Dialog */}
             <AlertDialog
@@ -2080,14 +1400,12 @@ export function ModelConfigDialog({
                             <AlertCircle className="h-6 w-6 text-destructive" />
                         </div>
                         <AlertDialogTitle className="text-center">
-                            {dict.modelConfig.deleteProvider}
+                            {t.deleteProvider}
                         </AlertDialogTitle>
                         <AlertDialogDescription className="text-center">
-                            {formatMessage(dict.modelConfig.deleteConfirmDesc, {
+                            {formatMessage(t.deleteConfirmDesc, {
                                 name: selectedProvider
-                                    ? selectedProvider.name ||
-                                      PROVIDER_INFO[selectedProvider.provider]
-                                          .label
+                                    ? providerName(selectedProvider)
                                     : "this provider",
                             })}
                         </AlertDialogDescription>
@@ -2099,16 +1417,9 @@ export function ModelConfigDialog({
                                     htmlFor="delete-confirm"
                                     className="text-sm text-muted-foreground"
                                 >
-                                    {formatMessage(
-                                        dict.modelConfig.typeToConfirm,
-                                        {
-                                            name:
-                                                selectedProvider.name ||
-                                                PROVIDER_INFO[
-                                                    selectedProvider.provider
-                                                ].label,
-                                        },
-                                    )}
+                                    {formatMessage(t.typeToConfirm, {
+                                        name: providerName(selectedProvider),
+                                    })}
                                 </Label>
                                 <Input
                                     id="delete-confirm"
@@ -2116,34 +1427,28 @@ export function ModelConfigDialog({
                                     onChange={(e) =>
                                         setDeleteConfirmText(e.target.value)
                                     }
-                                    placeholder={
-                                        dict.modelConfig.typeProviderName
-                                    }
+                                    placeholder={t.typeProviderName}
                                     className="h-9"
                                 />
                             </div>
                         )}
                     <AlertDialogFooter>
-                        <AlertDialogCancel>
-                            {dict.modelConfig.cancel}
-                        </AlertDialogCancel>
+                        <AlertDialogCancel>{t.cancel}</AlertDialogCancel>
                         <AlertDialogAction
                             onClick={handleDeleteProvider}
                             disabled={
                                 selectedProvider &&
                                 selectedProvider.models.length >= 3 &&
                                 deleteConfirmText !==
-                                    (selectedProvider.name ||
-                                        PROVIDER_INFO[selectedProvider.provider]
-                                            .label)
+                                    providerName(selectedProvider)
                             }
                             className="bg-destructive text-destructive-foreground hover:bg-destructive/90 disabled:opacity-50"
                         >
-                            {dict.modelConfig.delete}
+                            {t.delete}
                         </AlertDialogAction>
                     </AlertDialogFooter>
                 </AlertDialogContent>
             </AlertDialog>
-        </Dialog>
+        </>
     )
 }

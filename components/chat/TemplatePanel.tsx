@@ -41,7 +41,8 @@ import { TemplateEditDialog } from "./TemplateEditDialog"
 
 interface TemplatePanelProps {
     setInput: (input: string) => void
-    onSendTemplate?: (template: Template) => void
+    /** Whether it was sent */
+    onSendTemplate?: (template: Template) => Promise<boolean>
     currentInput?: string
 }
 
@@ -110,6 +111,10 @@ export function TemplatePanel({
 
     useEffect(() => {
         loadTemplates()
+        // Reload when a template is saved elsewhere, e.g. from the chat input
+        window.addEventListener("templatesChanged", loadTemplates)
+        return () =>
+            window.removeEventListener("templatesChanged", loadTemplates)
     }, [loadTemplates])
 
     const handleCreateSuccess = () => {
@@ -174,16 +179,21 @@ export function TemplatePanel({
 
     // Actually send the template
     const sendTemplate = async (template: Template) => {
-        // Increment click count only when actually sending
-        await incrementClickCount(template.id)
         if (onSendTemplate) {
-            // Increment run count and update lastUsedAt
-            await incrementRunCount(template.id)
-            // Reload to show updated stats
-            loadTemplates()
-            // Call the send callback
-            onSendTemplate(template)
+            // Sent first, while the chat is the one it was clicked in (the
+            // counts wait for storage). A run only when it was sent (not
+            // while a message is still being sent, or attachments read).
+            const sending = onSendTemplate(template)
+            // Increment click count only when actually sending
+            await incrementClickCount(template.id)
+            if (await sending) {
+                // Increment run count and update lastUsedAt
+                await incrementRunCount(template.id)
+                // Reload to show updated stats
+                loadTemplates()
+            }
         } else {
+            await incrementClickCount(template.id)
             // Fallback: just fill the input if no send callback provided
             setInput(template.prompt)
         }
@@ -220,7 +230,8 @@ export function TemplatePanel({
             const url = URL.createObjectURL(blob)
             const a = document.createElement("a")
             a.href = url
-            a.download = `templates-${new Date().toISOString().split("T")[0]}.json`
+            // Local date as YYYY-MM-DD (toISOString would give UTC)
+            a.download = `templates-${new Date().toLocaleDateString("sv-SE")}.json`
             document.body.appendChild(a)
             a.click()
             document.body.removeChild(a)
@@ -302,18 +313,32 @@ export function TemplatePanel({
         }
     }
 
+    // Shared by the empty state and the list, so import works in both
+    const importInput = (
+        <input
+            ref={fileInputRef}
+            type="file"
+            accept="application/json,.json"
+            onChange={handleImport}
+            className="hidden"
+        />
+    )
+    const importMessageBox = importMessage && (
+        <div
+            className={`text-xs px-3 py-2 rounded-lg ${
+                importMessage.type === "success"
+                    ? "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400"
+                    : "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400"
+            }`}
+        >
+            {importMessage.text}
+        </div>
+    )
+
     // Empty state: no templates at all
     if (!loading && templates.length === 0) {
         return (
             <div className="py-6 px-2 animate-fade-in">
-                <div className="text-center mb-6">
-                    <h2 className="text-lg font-semibold text-foreground mb-2">
-                        {dict.templates.title}
-                    </h2>
-                    <p className="text-sm text-muted-foreground max-w-xs mx-auto">
-                        {dict.templates.subtitle}
-                    </p>
-                </div>
                 <div className="flex flex-col items-center justify-center py-8 px-4">
                     <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center mb-4">
                         <FileText className="w-8 h-8 text-primary/60" />
@@ -332,6 +357,18 @@ export function TemplatePanel({
                         <Plus className="w-4 h-4" />
                         {dict.templates.createFirst}
                     </button>
+                    <button
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                        className="mt-2 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                    >
+                        <Upload className="w-3.5 h-3.5" />
+                        {dict.templates.importTemplates}
+                    </button>
+                    {importInput}
+                    {importMessageBox && (
+                        <div className="mt-3">{importMessageBox}</div>
+                    )}
 
                     <TemplateCreateDialog
                         open={createDialogOpen}
@@ -389,27 +426,11 @@ export function TemplatePanel({
                         <Upload className="w-3.5 h-3.5" />
                         {dict.templates.importTemplates}
                     </button>
-                    <input
-                        ref={fileInputRef}
-                        type="file"
-                        accept="application/json,.json"
-                        onChange={handleImport}
-                        className="hidden"
-                    />
+                    {importInput}
                 </div>
 
                 {/* Import message */}
-                {importMessage && (
-                    <div
-                        className={`text-xs px-3 py-2 rounded-lg ${
-                            importMessage.type === "success"
-                                ? "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400"
-                                : "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400"
-                        }`}
-                    >
-                        {importMessage.text}
-                    </div>
-                )}
+                {importMessageBox}
 
                 <div className="space-y-2">
                     {loading
@@ -447,6 +468,8 @@ export function TemplatePanel({
                                         handleTemplateClick(template)
                                     }
                                     onKeyDown={(e) => {
+                                        // Ignore keys bubbling up from the action buttons
+                                        if (e.target !== e.currentTarget) return
                                         if (
                                             e.key === "Enter" ||
                                             e.key === " "

@@ -13,8 +13,6 @@ This guide explains how to configure different AI model providers for next-ai-dr
 
 ### Doubao (ByteDance Volcengine)
 
-> **Free tokens**: Register on the [Volcengine ARK platform](https://www.volcengine.com/activity/codingplan?ac=MMAP8JTTCAQ2&rc=Z9Z3LDTJ&utm_campaign=drawio&utm_content=drawio&utm_medium=devrel&utm_source=OWO&utm_term=drawio) to get 500K free tokens for all models!
-
 ```bash
 DOUBAO_API_KEY=your_api_key
 AI_MODEL=doubao-seed-1-8-251215  # or other Doubao model
@@ -61,10 +59,34 @@ Optional custom endpoint (for OpenAI-compatible services):
 OPENAI_BASE_URL=https://your-custom-endpoint/v1
 ```
 
+LM Studio and other local OpenAI-compatible servers work the same way: set the base URL to `http://localhost:1234/v1` (LM Studio's default port) and use any non-empty API key, such as `lm-studio`. This works both in the environment variables above and in the model settings.
+
+### AIHubMix
+
+AIHubMix provides access to Claude, GPT, Gemini, DeepSeek, and other models through a single API key.
+
+```bash
+AIHUBMIX_API_KEY=your_api_key
+AI_MODEL=claude-sonnet-4-5-20250929
+```
+
+Optional custom endpoint:
+
+```bash
+AIHUBMIX_BASE_URL=https://aihubmix.com/v1
+```
+
 ### Anthropic
 
 ```bash
 ANTHROPIC_API_KEY=your_api_key
+AI_MODEL=claude-sonnet-4-5-20250514
+```
+
+Or use a Bearer auth token instead of an API key (e.g. when going through a gateway that issues OAuth-style tokens). `ANTHROPIC_AUTH_TOKEN` is sent as `Authorization: Bearer <token>`, while `ANTHROPIC_API_KEY` is sent as `x-api-key`. The two are mutually exclusive — set only one:
+
+```bash
+ANTHROPIC_AUTH_TOKEN=your_auth_token
 AI_MODEL=claude-sonnet-4-5-20250514
 ```
 
@@ -142,8 +164,10 @@ AZURE_REASONING_SUMMARY=detailed  # Optional: none, brief, detailed
 AWS_REGION=us-west-2
 AWS_ACCESS_KEY_ID=your_access_key_id
 AWS_SECRET_ACCESS_KEY=your_secret_access_key
-AI_MODEL=anthropic.claude-sonnet-4-5-20250514-v1:0
+AI_MODEL=global.anthropic.claude-sonnet-5-5
 ```
+
+Recent Claude models answer only through an inference profile id, which starts with a region prefix such as `global.` or `us.`. The plain id (`anthropic.claude-sonnet-5-5`) fails with "on-demand throughput isn't supported".
 
 Note: On AWS (Lambda, EC2 with IAM role), credentials are automatically obtained from the IAM role.
 
@@ -170,7 +194,7 @@ AI_MODEL=llama3.2
 Optional custom URL:
 
 ```bash
-OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_BASE_URL=http://localhost:11434/api
 ```
 
 ### ModelScope
@@ -230,7 +254,7 @@ MiniMax supports two API formats:
 
 ```bash
 MINIMAX_API_KEY=your_api_key
-AI_MODEL=MiniMax-M2.7
+AI_MODEL=MiniMax-M3
 ```
 
 Optional configuration:
@@ -301,6 +325,19 @@ Optional custom endpoint:
 QINIU_BASE_URL=https://your-custom-endpoint
 ```
 
+### MiMo (Xiaomi)
+
+```bash
+MIMO_API_KEY=your_api_key
+AI_MODEL=mimo-v2.5-pro
+```
+
+Optional custom endpoint (Token Plan subscribers should set their dedicated Base URL):
+
+```bash
+MIMO_BASE_URL=https://token-plan-cn.xiaomimimo.com/v1
+```
+
 ## Auto-Detection
 
 If you only configure **one** provider's API key, the system will automatically detect and use that provider. No need to set `AI_PROVIDER`.
@@ -308,7 +345,7 @@ If you only configure **one** provider's API key, the system will automatically 
 If you configure **multiple** API keys, you must explicitly set `AI_PROVIDER`:
 
 ```bash
-AI_PROVIDER=google  # or: openai, anthropic, deepseek, siliconflow, doubao, azure, bedrock, openrouter, ollama, gateway, sglang, modelscope, minimax, glm, qwen, kimi, qiniu
+AI_PROVIDER=google  # or: openai, anthropic, aihubmix, deepseek, siliconflow, doubao, azure, bedrock, openrouter, ollama, gateway, sglang, modelscope, minimax, glm, qwen, kimi, qiniu, mimo
 ```
 
 ## Server-Side Multi-Model Configuration
@@ -328,6 +365,17 @@ AI_MODELS_CONFIG='{"providers":[{"name":"OpenAI","provider":"openai","models":["
 **Option 2: Config File**
 
 Create an `ai-models.json` file in the project root (or set `AI_MODELS_CONFIG_PATH` to a custom location).
+
+**Option 3: Comma-separated `AI_MODEL`** (quick setup, single provider)
+
+If you only need multiple models from one provider, list them in `AI_MODEL` separated by commas. The first model is treated as the default.
+
+```bash
+AI_PROVIDER=doubao
+AI_MODEL=doubao-seed-1-8-251215,doubao-seed-1-6-flash,doubao-seed-1-6-pro
+```
+
+This is shorthand for the equivalent `ai-models.json`. For multiple providers or custom `apiKeyEnv` / `baseUrlEnv`, use Option 1 or 2 instead.
 
 ### Example Configuration
 

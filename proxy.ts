@@ -27,9 +27,19 @@ function getLocale(request: NextRequest): string | undefined {
 export function proxy(request: NextRequest) {
     const pathname = request.nextUrl.pathname
 
-    // Skip API routes, static files, and Next.js internals
+    if (pathname.startsWith("/api/")) {
+        // With ORIGIN_SECRET set, API calls must come through the CDN that
+        // adds this header. A call straight to the origin could fake the
+        // CLIENT_IP_HEADER and get a fresh quota for every made-up IP.
+        const secret = process.env.ORIGIN_SECRET
+        if (secret && request.headers.get("x-origin-secret") !== secret) {
+            return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+        }
+        return
+    }
+
+    // Skip static files and Next.js internals
     if (
-        pathname.startsWith("/api/") ||
         pathname.startsWith("/_next/") ||
         pathname.startsWith("/drawio") ||
         pathname.includes("/favicon") ||
@@ -48,17 +58,19 @@ export function proxy(request: NextRequest) {
     if (pathnameIsMissingLocale) {
         const locale = getLocale(request)
 
-        // Redirect to localized path
-        return NextResponse.redirect(
-            new URL(
-                `/${locale}${pathname.startsWith("/") ? "" : "/"}${pathname}`,
-                request.url,
-            ),
-        )
+        // Redirect to localized path. Cloning nextUrl keeps the basePath
+        // (NEXT_PUBLIC_BASE_PATH) and query string, which
+        // new URL("/...", request.url) would drop.
+        const url = request.nextUrl.clone()
+        url.pathname = `/${locale}${pathname}`
+        return NextResponse.redirect(url)
     }
 }
 
 export const config = {
-    // Matcher ignoring `/_next/` and `/api/`
-    matcher: ["/((?!api|_next/static|_next/image|favicon.ico).*)"],
+    // API routes (for ORIGIN_SECRET), and pages without `/_next/` assets
+    matcher: [
+        "/api/:path*",
+        "/((?!api|_next/static|_next/image|favicon.ico).*)",
+    ],
 }
