@@ -9,6 +9,7 @@ services:
     restart: unless-stopped
     build:
       context: .
+      network: host
       args:
         - NEXT_PUBLIC_DRAWIO_BASE_URL=http://localhost:8086
         # Uncomment below for subdirectory deployment
