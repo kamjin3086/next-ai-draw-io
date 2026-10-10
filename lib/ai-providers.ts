@@ -690,6 +690,88 @@ function compatibleModel(
     })
 }
 
+/**
+ * Fix sglang's non-compliant stream deltas (empty role, non-standard
+ * reasoning_content) before the AI SDK parses them.
+ */
+const sglangFixFetch: typeof fetch = async (url, options) => {
+    const response = await fetch(url, options)
+    if (!response.body) {
+        return response
+    }
+
+    let buffer = ""
+    const decoder = new TextDecoder()
+
+    const transformStream = new TransformStream({
+        transform(chunk, controller) {
+            buffer += decoder.decode(chunk, { stream: true })
+            // Process all complete messages in the buffer
+            let messageEndPos
+            while ((messageEndPos = buffer.indexOf("\n\n")) !== -1) {
+                const message = buffer.substring(0, messageEndPos)
+                buffer = buffer.substring(messageEndPos + 2) // Move past the '\n\n'
+
+                if (message.startsWith("data: ")) {
+                    const jsonStr = message.substring(6).trim()
+                    if (jsonStr === "[DONE]") {
+                        controller.enqueue(
+                            new TextEncoder().encode(message + "\n\n"),
+                        )
+                        continue
+                    }
+                    try {
+                        const data = JSON.parse(jsonStr)
+                        const delta = data.choices?.[0]?.delta
+
+                        if (delta) {
+                            // Fix 1: remove invalid empty role
+                            if (delta.role === "") {
+                                delete delta.role
+                            }
+                            // Fix 2: remove non-standard reasoning_content field
+                            if ("reasoning_content" in delta) {
+                                delete delta.reasoning_content
+                            }
+                        }
+
+                        // Re-serialize and forward the corrected data with the correct SSE format
+                        controller.enqueue(
+                            new TextEncoder().encode(
+                                `data: ${JSON.stringify(data)}\n\n`,
+                            ),
+                        )
+                    } catch (_e) {
+                        // If parsing fails, forward the original message to avoid breaking the stream.
+                        controller.enqueue(
+                            new TextEncoder().encode(message + "\n\n"),
+                        )
+                    }
+                } else if (message.trim() !== "") {
+                    // Pass through other message types (e.g., 'event: ...')
+                    controller.enqueue(
+                        new TextEncoder().encode(message + "\n\n"),
+                    )
+                }
+            }
+        },
+        flush(controller) {
+            // If there's anything left in the buffer, forward it.
+            if (buffer.trim()) {
+                controller.enqueue(new TextEncoder().encode(buffer))
+            }
+        },
+    })
+
+    const transformedBody = response.body.pipeThrough(transformStream)
+
+    return new Response(transformedBody, {
+        status: response.status,
+        statusText: response.statusText,
+        headers: response.headers,
+    })
+}
+
 /** Create the model for a provider. Credentials are already resolved. */
 function createModel(
     provider: ProviderName,
@@ -777,8 +859,14 @@ function createModel(
                   })(modelId)
                 : compatibleModel(provider, modelId, { ...e, baseURL })
         }
+        case "sglang":
+            // sglang's stream is not OpenAI-compliant; fix it in flight
+            return compatibleModel(provider, modelId, {
+                ...e,
+                fetch: e.fetch ?? sglangFixFetch,
+            })
         default:
-            // siliconflow, sglang, modelscope, glm, qwen, qiniu, novita,
+            // siliconflow, modelscope, glm, qwen, qiniu, novita,
             // atlascloud, edgeone
             return compatibleModel(provider, modelId, e)
     }

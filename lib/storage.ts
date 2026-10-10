@@ -21,9 +21,6 @@ export const STORAGE_KEYS = {
     // Diagram validation
     vlmValidationEnabled: "next-ai-draw-io-vlm-validation-enabled",
 
-    // DrawIO instance URL (runtime override for self-hosted deployments)
-    drawioBaseUrl: "next-ai-draw-io-drawio-base-url",
-
     // Custom system message
     customSystemMessage: "next-ai-draw-io-custom-system-message",
 
